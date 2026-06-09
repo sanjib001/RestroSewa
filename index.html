@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to The Chakra</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    
+    <!-- Instant Auto Routing -->
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const table = urlParams.get('table');
+        if (table && /^[A-Z0-9]+$/i.test(table)) {
+            window.location.href = `menu.html?table=${table.toUpperCase()}`;
+        }
+    </script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&family=Playfair+Display:ital,wght@0,700;1,500&display=swap" rel="stylesheet">
+    
+    <!-- popups.js Alert Interceptor -->
+    <script src="popups.js"></script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: linear-gradient(135deg, #1b0f0d 0%, #301712 50%, #4a2118 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: #f7ebe1;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        /* Premium Background Glows */
+        body::before {
+            content: '';
+            position: absolute;
+            width: 300px;
+            height: 300px;
+            background: #d95d39;
+            filter: blur(120px);
+            opacity: 0.15;
+            top: 10%;
+            left: 10%;
+            pointer-events: none;
+        }
+        body::after {
+            content: '';
+            position: absolute;
+            width: 400px;
+            height: 400px;
+            background: #f28f3b;
+            filter: blur(150px);
+            opacity: 0.1;
+            bottom: 5%;
+            right: 10%;
+            pointer-events: none;
+        }
+
+        .welcome-card {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            padding: 40px 30px;
+            border-radius: 24px;
+            width: 100%;
+            max-width: 440px;
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4);
+            text-align: center;
+            animation: cardEntrance 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes cardEntrance {
+            from {
+                opacity: 0;
+                transform: translateY(30px) scale(0.96);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .logo-area h1 {
+            font-family: 'Playfair Display', serif;
+            font-size: 2.5rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+            margin-bottom: 6px;
+            background: linear-gradient(135deg, #f7ebe1 30%, #f28f3b 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo-area p {
+            font-size: 0.9rem;
+            color: #a89f97;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            margin-bottom: 30px;
+        }
+
+        .intro-text {
+            font-size: 1rem;
+            color: #d8cfc4;
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            text-align: left;
+            margin-bottom: 24px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: #a89f97;
+            font-weight: 600;
+            margin-bottom: 8px;
+            padding-left: 4px;
+        }
+
+        .table-input {
+            width: 100%;
+            padding: 16px 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 12px;
+            color: #fff;
+            font-size: 1.2rem;
+            font-weight: 600;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .table-input:focus {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: #f28f3b;
+            box-shadow: 0 0 15px rgba(242, 143, 59, 0.2);
+        }
+
+        .table-input::placeholder {
+            color: rgba(255, 255, 255, 0.25);
+            text-transform: none;
+            font-size: 1rem;
+            font-weight: 400;
+            letter-spacing: 0;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 16px 24px;
+            background: #d95d39;
+            background: linear-gradient(135deg, #d95d39 0%, #c04926 100%);
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 20px rgba(217, 93, 57, 0.2);
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 25px rgba(217, 93, 57, 0.3);
+            background: linear-gradient(135deg, #e46e4b 0%, #c04926 100%);
+        }
+
+        .submit-btn:active {
+            transform: translateY(0);
+        }
+
+        footer {
+            margin-top: 30px;
+            font-size: 0.75rem;
+            color: #7d756d;
+            letter-spacing: 1px;
+        }
+        footer a {
+            color: #a89f97;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+        footer a:hover {
+            color: #f28f3b;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="welcome-card">
+        <div class="logo-area">
+            <h1>The Chakra</h1>
+            <p>Fine Dining</p>
+        </div>
+
+        <p class="intro-text">
+            To view our menu and order directly from your smartphone, scan the table QR code or input the table code below.
+        </p>
+
+        <form id="landing-table-form" onsubmit="handleLandingSubmit(event)">
+            <div class="form-group">
+                <label for="table-code-input">Table Code</label>
+                <input type="text" id="table-code-input" class="table-input" placeholder="e.g. A1, B3, Counter" required>
+            </div>
+            
+            <button type="submit" class="submit-btn">Open Menu</button>
+        </form>
+
+        <footer>
+            <a href="admin.html">Staff Admin Access</a>
+        </footer>
+    </div>
+
+    <script>
+        function handleLandingSubmit(e) {
+            e.preventDefault();
+            const tableVal = document.getElementById('table-code-input').value.trim();
+            if (tableVal) {
+                // Alphanumeric validation
+                if (/^[A-Z0-9]+$/i.test(tableVal)) {
+                    window.location.href = `menu.html?table=${encodeURIComponent(tableVal.toUpperCase())}`;
+                } else {
+                    alert('❌ Invalid table code. Please use alphanumeric characters only (e.g., A1, B4).');
+                }
+            } else {
+                alert('⚠️ Please enter a Table Code.');
+            }
+        }
+    </script>
+
+</body>
+</html>

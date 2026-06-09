@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Chakra - Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="popups.js"></script>
+
+    <style>
+        /* order-status-partially_paid is not in styles.css, add it here */
+        .order-status-partially_paid {
+            background-color: rgba(245, 158, 11, 0.06);
+        }
+        .order-status-partially_paid:hover {
+            background-color: rgba(245, 158, 11, 0.1);
+        }
+
+        /* Receipt modal uses light/print styling */
+        #receipt-print-area {
+            color: #222;
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        /* New total in reduction modal */
+        #reduce-modal-new-total {
+            color: var(--success);
+            font-size: 1.4rem;
+            font-weight: 700;
+        }
+
+        /* Reduction modal footer */
+        .reduce-modal-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 15px;
+            border-top: 1px solid var(--border-color);
+            margin-top: 10px;
+        }
+
+        /* Confirm reduction button */
+        .confirm-reduction-btn {
+            background-color: var(--primary);
+            color: #040815;
+        }
+        .confirm-reduction-btn:hover {
+            background-color: var(--primary-hover);
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- In-app new order alert banner -->
+    <div id="new-order-banner" class="new-order-alert-banner" role="alert" aria-live="assertive"></div>
+
+    <header>
+        <h1>The Chakra Dashboard</h1>
+        <div class="header-actions">
+            <span id="live-badge" class="live-badge offline" title="Realtime connection status">
+                <span id="live-dot" class="live-dot offline"></span>
+                LIVE
+            </span>
+            <button id="logout-btn" class="logout-button">Log Out</button>
+        </div>
+    </header>
+
+    <div class="dashboard-container">
+
+        <section class="data-section">
+            <h2 id="orders-title">🧾 Today's Orders <span id="pending-count"></span></h2>
+
+            <!-- Analytics Stats Grid -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <span class="stat-title">Total Revenue</span>
+                        <span class="stat-icon-bg revenue">💰</span>
+                    </div>
+                    <div class="stat-number" id="stat-total-revenue">Rs. 0.00</div>
+                    <div class="stat-desc">From completed/paid orders</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <span class="stat-title">Cash Collected</span>
+                        <span class="stat-icon-bg cash">💵</span>
+                    </div>
+                    <div class="stat-number" id="stat-cash-revenue">Rs. 0.00</div>
+                    <div class="stat-desc">Physical cash payments</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <span class="stat-title">Online Payments</span>
+                        <span class="stat-icon-bg online">💳</span>
+                    </div>
+                    <div class="stat-number" id="stat-online-revenue">Rs. 0.00</div>
+                    <div class="stat-desc">Digital payments</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <span class="stat-title">Active Orders</span>
+                        <span class="stat-icon-bg active-orders">🔔</span>
+                    </div>
+                    <div class="stat-number" id="stat-open-orders">0</div>
+                    <div class="stat-desc">In kitchen / awaiting payment</div>
+                </div>
+            </div>
+
+            <div class="control-panel">
+                <h2>Order Controls</h2>
+
+                <div class="control-group filter-group-row">
+                    <div class="control-item">
+                        <label for="date-filter">Date:</label>
+                        <input type="date" id="date-filter">
+                    </div>
+                    <div class="control-item">
+                        <label for="status-filter">Status:</label>
+                        <select id="status-filter">
+                            <option value="all">All Statuses</option>
+                            <option value="pending">Pending</option>
+                            <option value="preparing">Preparing</option>
+                            <option value="served">Served</option>
+                            <option value="partially_paid">Partially Paid</option>
+                            <option value="paid">Paid</option>
+                            <option value="cancelled">Cancelled</option>
+                        </select>
+                    </div>
+                    <div class="control-item">
+                        <label for="table-filter">Table No:</label>
+                        <input type="text" id="table-filter" placeholder="Filter by Table">
+                    </div>
+                    <button id="export-btn" style="background-color: #2ecc71;">Export to CSV</button>
+
+                    <a href="table_selector.html" class="manual-order-link"
+                        style="margin-left: auto; align-self: flex-end;">
+                        ➕ Place New Order Manually
+                    </a>
+                </div>
+
+                <div class="control-group summary-actions" style="display:none;">
+                    <p id="daily-summary">Loading summary...</p>
+                </div>
+            </div>
+
+            <div class="table-wrapper">
+                <table id="orders-table">
+                    <thead>
+                        <tr>
+                            <th>Table</th>
+                            <th>Time</th>
+                            <th>Items</th>
+                            <th>Net Total</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="orders-list">
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <hr>
+
+        <section class="data-section">
+            <h2>🍴 Menu Management</h2>
+
+            <div class="control-panel">
+                <h2>Add New Menu Item</h2>
+                <form id="new-item-form" style="display: flex; flex-direction: column;">
+                    <div class="control-group filter-group-row" style="padding-top: 0;">
+                        <div class="control-item" style="flex-basis: 30%;">
+                            <label for="new-item-name">Name:</label>
+                            <input type="text" id="new-item-name" placeholder="Item Name" required>
+                        </div>
+                        <div class="control-item" style="flex-basis: 20%;">
+                            <label for="new-item-category">Category:</label>
+                            <input type="text" id="new-item-category" placeholder="Category" required>
+                        </div>
+                        <div class="control-item" style="flex-basis: 15%;">
+                            <label for="new-item-price">Price (Rs.):</label>
+                            <input type="number" id="new-item-price" placeholder="Price" step="0.01" required>
+                        </div>
+
+                        <div class="control-item" style="flex-basis: 15%; align-self: flex-end;">
+                            <label>&nbsp;</label>
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="new-item-available" checked>
+                                <label for="new-item-available">Available</label>
+                            </div>
+                        </div>
+
+                        <div class="control-item" style="flex-basis: 15%; align-self: flex-end;">
+                            <label>&nbsp;</label>
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="new-item-special">
+                                <label for="new-item-special">Special</label>
+                            </div>
+                        </div>
+                        <button type="submit" style="flex-basis: 10%;">Add Item</button>
+                    </div>
+                </form>
+                <p id="menu-management-message"></p>
+            </div>
+
+            <div class="table-wrapper">
+                <table id="menu-management-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Category</th>
+                            <th>Price</th>
+                            <th>Available</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="menu-list">
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+    </div>
+
+    <div id="edit-menu-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-button" onclick="closeEditModal()">&times;</span>
+            <h2>Edit Menu Item</h2>
+
+            <input type="hidden" id="edit-item-id">
+
+            <div class="modal-group">
+                <label for="edit-item-name">Name:</label>
+                <input type="text" id="edit-item-name">
+            </div>
+
+            <div class="modal-group">
+                <label for="edit-item-category">Category:</label>
+                <input type="text" id="edit-item-category">
+            </div>
+
+            <div class="modal-group">
+                <label for="edit-item-price">Price (Rs.):</label>
+                <input type="number" id="edit-item-price" step="0.01">
+            </div>
+
+            <div class="modal-group">
+                <label>Available:</label>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="edit-item-available">
+                    <label for="edit-item-available">Item is currently available</label>
+                </div>
+            </div>
+
+            <div class="modal-group">
+                <label>Today's Special:</label>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="edit-item-special">
+                    <label for="edit-item-special">Mark as Today's Special</label>
+                </div>
+            </div>
+            <button onclick="processEdit()" style="background-color: #27ae60; margin-top: 15px;">Save Changes</button>
+        </div>
+    </div>
+
+    <div id="payment-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-button" onclick="closeModal()">&times;</span>
+            <h2 id="modal-title">Complete Payment</h2>
+
+            <input type="hidden" id="modal-order-id">
+            <input type="hidden" id="modal-order-total-due">
+
+            <p style="font-size: 1.5em; font-weight: bold; margin: 15px 0;">
+                Total Due: <span id="modal-total-amount" class="text-red-500" style="color: #e74c3c;">Rs. 0.00</span>
+            </p>
+
+            <h3>Payment Method</h3>
+            <div class="payment-options">
+                <button class="pay-cash" onclick="handlePaymentSelection('cash')">Cash Only</button>
+                <button class="pay-online" onclick="handlePaymentSelection('online')">Online Only</button>
+                <button class="pay-mixed" onclick="handlePaymentSelection('both')">Mixed</button>
+            </div>
+
+            <div id="both-payment-inputs" class="mixed-payment-section" style="display: none;">
+                <label for="input-cash-amount">Cash Paid (Rs.):</label>
+                <input type="number" id="input-cash-amount" step="0.01" value="" placeholder="0.00"
+                    oninput="calculateRemainingOnline()">
+
+                <label for="input-online-amount">Online/Card Paid (Rs.):</label>
+                <input type="number" id="input-online-amount" step="0.01" disabled>
+
+                <button class="confirm-split" onclick="processMixedPayment()"
+                    style="background-color: #2c3e50; margin-top: 15px; width: 100%;">Confirm Mixed Payment</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="reduce-order-modal" class="modal">
+        <div class="modal-content large-modal">
+            <span class="close-button" onclick="closeReduceModal()">&times;</span>
+            <h2 id="reduce-modal-title">Modify Order Items / Cancel Items</h2>
+
+            <input type="hidden" id="reduce-modal-order-id">
+
+            <p style="color: #e74c3c; font-weight: bold; margin-bottom: 15px;">
+                Adjust the **New Qty** (Min 0, Max Original Qty). Setting to **0 removes the item**.
+            </p>
+
+            <div class="reduce-item-row" style="font-weight: bold; border-bottom: 2px solid #ccc;">
+                <span class="reduce-item-name">Item Name</span>
+                <span class="reduce-item-qty">Original Qty</span>
+                <div class="reduce-item-controls">
+                    <span style="width: 60px; text-align: center;">New Qty</span>
+                    <span style="width: 45%; text-align: right;">New Item Total</span>
+                </div>
+            </div>
+
+            <div id="reduce-modal-item-list">
+            </div>
+
+            <div style="margin-top: 15px;">
+                <p style="font-size: 1.1em; font-weight: bold;">
+                    Original Bill Total: <span id="reduce-modal-current-total" style="color: #95a5a6;">Rs. 0.00</span>
+                </p>
+                <p style="font-size: 1.5em; font-weight: bold;">
+                    New Final Total: <span id="reduce-modal-new-total" style="color: #2ecc71;">Rs. 0.00</span>
+                </p>
+            </div>
+
+
+            <div class="reduce-modal-footer">
+                <div id="reduce-modal-delete-container">
+                </div>
+
+                <div>
+                    <button onclick="closeReduceModal()" class="cancel-btn">
+                        Close
+                    </button>
+                    <button onclick="processOrderReduction()" class="confirm-reduction-btn">
+                        Confirm Modification & Update Bill
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Receipt Modal -->
+    <div id="receipt-modal" class="modal">
+        <div class="modal-content"
+            style="max-width: 420px; font-family: 'Courier New', Courier, monospace; color: #222; border: 2px solid #333; border-radius: 8px;">
+            <span class="close-button" onclick="closeReceiptModal()">&times;</span>
+            <div id="receipt-print-area" style="padding: 10px;">
+                <!-- Receipt content goes here dynamically -->
+            </div>
+            <div style="margin-top: 20px; display: flex; gap: 10px; padding: 0 10px 10px 10px;">
+                <button onclick="closeReceiptModal()"
+                    style="flex: 1; background-color: #95a5a6; color: white; border: none; border-radius: 4px; padding: 10px; cursor: pointer;">Close</button>
+                <button onclick="printReceiptFromModal()"
+                    style="flex: 2; background-color: #27ae60; color: white; font-weight: bold; border: none; border-radius: 4px; padding: 10px; cursor: pointer;">🖨️
+                    Print Receipt</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="admin.js"></script>
+</body>
+
+</html>
