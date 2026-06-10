@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
 import { signInEmployee } from '@/app/actions/auth'
 
 export default function EmployeeLoginForm({
@@ -11,7 +10,6 @@ export default function EmployeeLoginForm({
   slug: string
   disabled: boolean
 }) {
-  const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [employeeId, setEmployeeId] = useState('')
   const [pin, setPin] = useState('')
@@ -25,10 +23,7 @@ export default function EmployeeLoginForm({
       const result = await signInEmployee(employeeId, slug, pin)
       if (!result.success) {
         setError(result.error)
-        return
       }
-      router.push('/operations')
-      router.refresh()
     })
   }
 

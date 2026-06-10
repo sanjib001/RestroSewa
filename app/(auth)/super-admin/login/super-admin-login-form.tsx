@@ -1,11 +1,9 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
 import { signInSuperAdmin } from '@/app/actions/auth'
 
 export default function SuperAdminLoginForm() {
-  const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -19,10 +17,7 @@ export default function SuperAdminLoginForm() {
       const result = await signInSuperAdmin(email, password)
       if (!result.success) {
         setError(result.error)
-        return
       }
-      router.push('/super-admin')
-      router.refresh()
     })
   }
 

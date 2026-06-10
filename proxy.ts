@@ -45,20 +45,27 @@ export async function proxy(request: NextRequest) {
 
   // Protect /operations — restaurant staff only
   if (pathname.startsWith('/operations')) {
-    if (!user || (role !== 'restaurant_admin' && role !== 'restaurant_employee')) {
+    if (!user) {
+      return NextResponse.redirect(new URL('/login', request.url))
+    }
+    if (role !== 'restaurant_admin' && role !== 'restaurant_employee') {
       return NextResponse.redirect(new URL('/unauthorized', request.url))
     }
   }
 
-  // Protect /super-admin — super admin only
-  if (pathname.startsWith('/super-admin')) {
-    if (!user || role !== 'super_admin') {
-      return NextResponse.redirect(new URL('/login', request.url))
+  // Protect /super-admin — exclude the login page itself
+  if (pathname.startsWith('/super-admin') && pathname !== '/super-admin/login') {
+    const isSuperAdmin =
+      role === 'super_admin' || user?.app_metadata?.role === 'super_admin'
+    if (!user || !isSuperAdmin) {
+      return NextResponse.redirect(new URL('/super-admin/login', request.url))
     }
   }
 
   return response
 }
+
+export const runtime = 'nodejs'
 
 export const proxyConfig = {
   matcher: [

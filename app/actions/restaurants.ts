@@ -1,14 +1,14 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/service'
 import { requireAuth } from '@/lib/auth'
 import type { ActionResult } from '@/types/app'
 
-function onlySuperAdmin() {
-  return requireAuth('/login').then((u) => {
-    if (u.role !== 'super_admin') throw new Error('Unauthorized')
-  })
+async function onlySuperAdmin() {
+  const u = await requireAuth('/login')
+  if (u.role !== 'super_admin') redirect('/unauthorized')
 }
 
 function slugify(name: string) {

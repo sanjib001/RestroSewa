@@ -1,6 +1,5 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
@@ -29,14 +28,19 @@ export async function signInEmployee(
   const email = `emp-${employeeId.trim()}-${(restaurant as { id: string; status: string }).id}@restrosewa.internal`
 
   const supabase = await createSupabaseServerClient()
-  const { error } = await supabase.auth.signInWithPassword({ email, password: pin })
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password: pin })
 
   if (error) {
     return { success: false, error: 'Invalid Employee ID or PIN.', code: 'INVALID_CREDENTIALS' }
   }
 
-  revalidatePath('/operations')
-  return { success: true, data: undefined }
+  // Portal separation: super admin accounts must not log in through the staff portal
+  if (data.user?.app_metadata?.role === 'super_admin') {
+    await supabase.auth.signOut()
+    return { success: false, error: 'Invalid Employee ID or PIN.', code: 'INVALID_CREDENTIALS' }
+  }
+
+  redirect('/operations')
 }
 
 export async function signInSuperAdmin(
@@ -50,17 +54,19 @@ export async function signInSuperAdmin(
     return { success: false, error: 'Invalid credentials.', code: 'INVALID_CREDENTIALS' }
   }
 
+  // Portal separation: only super admin accounts may use this portal
   if (data.user?.app_metadata?.role !== 'super_admin') {
     await supabase.auth.signOut()
     return { success: false, error: 'Access denied.', code: 'UNAUTHORIZED' }
   }
 
-  revalidatePath('/super-admin')
-  return { success: true, data: undefined }
+  redirect('/super-admin')
 }
 
 export async function signOut() {
   const supabase = await createSupabaseServerClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  const isSuperAdmin = user?.app_metadata?.role === 'super_admin'
   await supabase.auth.signOut()
-  redirect('/login')
+  redirect(isSuperAdmin ? '/super-admin/login' : '/login')
 }

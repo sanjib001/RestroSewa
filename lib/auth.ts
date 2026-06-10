@@ -16,6 +16,18 @@ export async function getAuthUser(): Promise<AuthUser | null> {
   const { data: { user }, error } = await supabase.auth.getUser()
   if (error || !user) return null
 
+  // Super admin is identified via app_metadata — no JWT hook required
+  if (user.app_metadata?.role === 'super_admin') {
+    return {
+      id: user.id,
+      restaurantUserId: undefined,
+      role: 'super_admin',
+      restaurantId: undefined,
+      permissions: [],
+    }
+  }
+
+  // Restaurant staff: role and claims come from JWT (requires custom_access_token_hook)
   const { data: { session } } = await supabase.auth.getSession()
   if (!session) return null
 
