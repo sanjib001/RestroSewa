@@ -65,8 +65,6 @@ export async function proxy(request: NextRequest) {
   return response
 }
 
-export const runtime = 'nodejs'
-
 export const proxyConfig = {
   matcher: [
     '/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
