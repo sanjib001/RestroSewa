@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Success - The Chakra</title>
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            font-family: Inter, "Segoe UI", Arial, sans-serif;
+            background: radial-gradient(circle at top, rgba(34, 197, 94, 0.18), transparent 32%), linear-gradient(135deg, #07130c 0%, #0e1f15 50%, #07130c 100%);
+            color: #ecfdf5;
+            padding: 24px;
+        }
+        .card {
+            width: 100%;
+            max-width: 560px;
+            padding: 40px;
+            border-radius: 24px;
+            background: rgba(8, 20, 13, 0.78);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+            backdrop-filter: blur(18px);
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 14px;
+            border-radius: 999px;
+            background: rgba(34, 197, 94, 0.16);
+            color: #86efac;
+            font-size: 0.82rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 18px;
+        }
+        h1 {
+            font-size: clamp(2rem, 4vw, 3rem);
+            line-height: 1;
+            margin-bottom: 12px;
+        }
+        p { color: #bbf7d0; line-height: 1.7; margin-bottom: 14px; }
+        .muted { color: #86efac; opacity: 0.85; }
+        a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 18px;
+            border-radius: 12px;
+            text-decoration: none;
+            font-weight: 700;
+        }
+        .primary { background: #22c55e; color: white; }
+        .secondary { background: rgba(255,255,255,0.08); color: #ecfdf5; border: 1px solid rgba(255,255,255,0.12); }
+        .status-box {
+            margin-top: 20px;
+            padding: 16px;
+            border-radius: 16px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.08);
+            color: #dcfce7;
+        }
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.4);
+            border-top-color: white;
+            border-radius: 50%;
+            display: inline-block;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (max-width: 640px) {
+            .card { padding: 28px 22px; }
+            .actions { flex-direction: column; }
+            a { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <main class="card">
+        <div class="badge">Payment Status</div>
+        <h1>Payment successful</h1>
+        <p id="status-text">Finalizing your order and resetting the table view...</p>
+        <div class="status-box" id="detail-box">
+            <span class="spinner"></span> Verifying payment result.
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        const SUPABASE_URL = 'https://alcdglhmitibxzeltioi.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFsY2RnbGhtaXRpYnh6ZWx0aW9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM0ODc1MjgsImV4cCI6MjA4OTA2MzUyOH0.luW8aBhMU1RaelO2rqr2W51xdwD6htVgi7BIF7dR9d4';
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const params = new URLSearchParams(window.location.search);
+        const orderId = params.get('order_id') || params.get('orderId');
+        const table = params.get('table');
+
+        function setText(statusText, detailText) {
+            const statusEl = document.getElementById('status-text');
+            const detailEl = document.getElementById('detail-box');
+
+            if (statusEl) statusEl.textContent = statusText;
+            if (detailEl) detailEl.textContent = detailText;
+        }
+
+        async function finalizeOrder() {
+            if (!orderId) {
+                setText('Payment was received, but the order reference is missing.', 'Please return to the menu and refresh the table view.');
+                return;
+            }
+
+            // Step 1: Fetch the current order to know the exact amount paid via eSewa
+            const { data: orderData, error: fetchError } = await supabase
+                .from('orders')
+                .select('id, total_amount, due_amount, discount_amount, cash_amount, online_amount, table_number, status')
+                .eq('id', orderId)
+                .single();
+
+            if (fetchError) {
+                setText('Payment was successful, but we could not retrieve your order details.', fetchError.message);
+                return;
+            }
+
+            // If already paid (e.g. page reloaded), skip double-updating
+            if (orderData.status === 'paid') {
+                setText('Payment successful. Returning you to the table now...', `Order ${orderData.id.substring(0, 8)}... is already marked as paid.`);
+                redirectAfterPayment(table || orderData.table_number, orderData.id);
+                return;
+            }
+
+            // Step 2: Calculate how much was paid via eSewa (the remaining due amount)
+            // due_amount holds the outstanding balance. If partially paid before, it reflects what's left.
+            const duePaise   = Math.round(parseFloat(orderData.due_amount   || 0) * 100);
+            const cashPaise  = Math.round(parseFloat(orderData.cash_amount  || 0) * 100);
+            const onlinePaise = Math.round(parseFloat(orderData.online_amount || 0) * 100);
+
+            // The eSewa payment covers the full remaining due amount
+            const newOnlinePaise = onlinePaise + duePaise;
+
+            // Convert back to rupees with 2 decimal places for the DB
+            const newOnlineAmount = (newOnlinePaise / 100).toFixed(2);
+            const cashAmount      = (cashPaise / 100).toFixed(2); // preserve any prior cash payments
+
+            // Step 3: Update the order — status=paid, record online payment amount
+            const { data, error } = await supabase
+                .from('orders')
+                .update({
+                    status: 'paid',
+                    due_amount: '0.00',
+                    online_amount: newOnlineAmount,
+                    cash_amount: cashAmount,
+                    customer_message: `eSewa payment received for Table ${orderData.table_number}. Click Received on the admin dashboard to dismiss this notice.`
+                })
+                .eq('id', orderId)
+                .select('id, status, table_number, customer_message')
+                .single();
+
+            if (error) {
+                setText('Payment was successful, but the order could not be finalized yet.', error.message);
+                return;
+            }
+
+            setText(
+                'Payment successful. Returning you to the table now...',
+                `Order ${data.id.substring(0, 8)}... is marked as PAID via eSewa (Rs. ${(newOnlinePaise / 100).toFixed(2)}).`
+            );
+
+            redirectAfterPayment(table || data.table_number, data.id);
+        }
+
+        function redirectAfterPayment(targetTable, orderId) {
+            try {
+                sessionStorage.setItem('chakra_post_payment_reset', JSON.stringify({
+                    table: targetTable || '',
+                    orderId: orderId,
+                    timestamp: Date.now()
+                }));
+            } catch (storageError) {
+                console.warn('Unable to set post-payment reset flag:', storageError);
+            }
+
+            window.setTimeout(() => {
+                window.location.href = targetTable
+                    ? `../menu.html?table=${encodeURIComponent(targetTable)}&fresh=1`
+                    : '../menu.html';
+            }, 1800);
+        }
+
+        finalizeOrder().catch(error => {
+            console.error('success finalize error:', error);
+            setText('Payment was successful, but the order finalization failed.', error.message || 'Unknown error');
+        });
+    </script>
+
+    
+</body>
+</html>

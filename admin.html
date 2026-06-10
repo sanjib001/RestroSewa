@@ -1,0 +1,340 @@
+<!-- admin.html  -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login - Restaurant POS</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <style>
+        :root {
+            --bg-dark: #15100d;
+            --bg-panel: rgba(25, 18, 14, 0.84);
+            --text-main: #fff8f1;
+            --text-muted: #d8c6b8;
+            --accent: #f59e0b;
+            --accent-strong: #d97706;
+            --accent-secondary: #ef4444;
+            --line: rgba(255, 255, 255, 0.12);
+            --shadow: 0 28px 70px rgba(0, 0, 0, 0.4);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Inter, "Segoe UI", Arial, sans-serif;
+            background:
+                radial-gradient(circle at top left, rgba(245, 158, 11, 0.22), transparent 28%),
+                radial-gradient(circle at bottom right, rgba(239, 68, 68, 0.2), transparent 30%),
+                linear-gradient(135deg, #0f0b09 0%, #1e1511 48%, #120d0a 100%);
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 24px;
+            overflow: hidden;
+        }
+
+        body::before,
+        body::after {
+            content: "";
+            position: fixed;
+            inset: auto;
+            border-radius: 999px;
+            pointer-events: none;
+            filter: blur(6px);
+        }
+
+        body::before {
+            width: 280px;
+            height: 280px;
+            left: -80px;
+            top: 10%;
+            background: rgba(245, 158, 11, 0.13);
+        }
+
+        body::after {
+            width: 220px;
+            height: 220px;
+            right: -60px;
+            bottom: 6%;
+            background: rgba(239, 68, 68, 0.12);
+        }
+
+        .login-container {
+            width: 100%;
+            max-width: 980px;
+            display: grid;
+            grid-template-columns: 1.05fr 0.95fr;
+            background: var(--bg-panel);
+            border: 1px solid var(--line);
+            border-radius: 28px;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            position: relative;
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+        }
+
+        .brand-panel {
+            padding: 48px;
+            background:
+                linear-gradient(150deg, rgba(245, 158, 11, 0.22), rgba(239, 68, 68, 0.08)),
+                linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 36px;
+            min-height: 560px;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            width: fit-content;
+            padding: 8px 14px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: var(--text-muted);
+            font-size: 0.82rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .eyebrow::before {
+            content: "";
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+            box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.14);
+        }
+
+        .brand-panel h1 {
+            margin: 18px 0 14px;
+            font-size: clamp(2.3rem, 4vw, 4rem);
+            line-height: 0.98;
+            letter-spacing: -0.04em;
+            color: var(--text-main);
+        }
+
+        .brand-panel p {
+            margin: 0;
+            max-width: 34ch;
+            font-size: 1.02rem;
+            line-height: 1.7;
+            color: var(--text-muted);
+        }
+
+        .feature-list {
+            display: grid;
+            gap: 14px;
+            margin-top: auto;
+        }
+
+        .feature-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 16px;
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .feature-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+            box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.12);
+            flex: 0 0 auto;
+        }
+
+        .feature-item span:last-child {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .form-panel {
+            width: 100%;
+            padding: 48px;
+            background: rgba(8, 6, 5, 0.2);
+        }
+
+        .form-panel h2 {
+            margin: 0 0 10px;
+            font-size: 1.9rem;
+            letter-spacing: -0.03em;
+            color: var(--text-main);
+        }
+
+        .form-panel .subtext {
+            margin: 0 0 32px;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        .form-group {
+            margin-bottom: 18px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--text-muted);
+            font-size: 0.94rem;
+        }
+
+        input[type="email"],
+        input[type="password"] {
+            width: 100%;
+            padding: 14px 16px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 14px;
+            box-sizing: border-box;
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text-main);
+            outline: none;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+        }
+
+        input[type="email"]::placeholder,
+        input[type="password"]::placeholder {
+            color: rgba(255, 248, 241, 0.5);
+        }
+
+        input[type="email"]:focus,
+        input[type="password"]:focus {
+            border-color: rgba(245, 158, 11, 0.75);
+            box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.16);
+            transform: translateY(-1px);
+        }
+
+        button {
+            width: 100%;
+            padding: 14px 16px;
+            margin-top: 10px;
+            background: linear-gradient(135deg, var(--accent) 0%, var(--accent-secondary) 100%);
+            color: #fffaf5;
+            border: none;
+            border-radius: 14px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+            box-shadow: 0 16px 28px rgba(245, 158, 11, 0.22);
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+            filter: brightness(1.03);
+            box-shadow: 0 20px 36px rgba(245, 158, 11, 0.3);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        #login-message {
+            margin-top: 16px;
+            min-height: 1.4em;
+            text-align: center;
+            font-weight: 600;
+            color: #fca5a5;
+        }
+
+        .form-note {
+            margin-top: 18px;
+            font-size: 0.88rem;
+            color: rgba(255, 248, 241, 0.62);
+            text-align: center;
+        }
+
+        @media (max-width: 860px) {
+            .login-container {
+                grid-template-columns: 1fr;
+            }
+
+            .brand-panel {
+                min-height: auto;
+                border-right: none;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            }
+
+            .form-panel,
+            .brand-panel {
+                padding: 32px;
+            }
+        }
+
+        @media (max-width: 520px) {
+            body {
+                padding: 14px;
+            }
+
+            .brand-panel,
+            .form-panel {
+                padding: 24px;
+            }
+
+            .form-panel h2 {
+                font-size: 1.6rem;
+            }
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+
+<body>
+
+    <div class="login-container">
+        <section class="brand-panel" aria-hidden="true">
+            <div>
+                <div class="eyebrow">Restaurant Admin Access</div>
+                <h1>Chakra POS</h1>
+                <p>Log in to manage live orders, tables, and service flow with a warm, premium kitchen-inspired interface.</p>
+            </div>
+
+            <div class="feature-list">
+                <div class="feature-item"><span class="feature-dot"></span><span>Rich amber and spice tones inspired by the restaurant.</span></div>
+                <div class="feature-item"><span class="feature-dot"></span><span>Clean glass-panel layout for quick admin focus.</span></div>
+                <div class="feature-item"><span class="feature-dot"></span><span>Built to feel polished on both desktop and mobile.</span></div>
+            </div>
+        </section>
+
+        <section class="form-panel">
+            <h2>Welcome back</h2>
+            <p class="subtext">Enter your admin credentials to continue to the dashboard.</p>
+
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" placeholder="admin@chakrarestaurant.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" placeholder="Enter password" required>
+                </div>
+                <button type="submit">Log In</button>
+            </form>
+
+            <p id="login-message"></p>
+            <p class="form-note">Secure access for restaurant staff only.</p>
+        </section>
+    </div>
+
+    <script src="admin.js"></script>
+</body>
+
+</html>

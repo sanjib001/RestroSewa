@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Failure - The Chakra</title>
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            font-family: Inter, "Segoe UI", Arial, sans-serif;
+            background: radial-gradient(circle at top, rgba(239, 68, 68, 0.18), transparent 32%), linear-gradient(135deg, #170909 0%, #261111 50%, #170909 100%);
+            color: #fff1f2;
+            padding: 24px;
+        }
+        .card {
+            width: 100%;
+            max-width: 560px;
+            padding: 40px;
+            border-radius: 24px;
+            background: rgba(32, 10, 10, 0.78);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+            backdrop-filter: blur(18px);
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 14px;
+            border-radius: 999px;
+            background: rgba(239, 68, 68, 0.16);
+            color: #fca5a5;
+            font-size: 0.82rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 18px;
+        }
+        h1 {
+            font-size: clamp(2rem, 4vw, 3rem);
+            line-height: 1;
+            margin-bottom: 12px;
+        }
+        p { color: #fecaca; line-height: 1.7; margin-bottom: 14px; }
+        .muted { color: #fda4af; opacity: 0.85; }
+        .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 22px; }
+        a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 18px;
+            border-radius: 12px;
+            text-decoration: none;
+            font-weight: 700;
+        }
+        .primary { background: #ef4444; color: white; }
+        .secondary { background: rgba(255,255,255,0.08); color: #fff1f2; border: 1px solid rgba(255,255,255,0.12); }
+        .status-box {
+            margin-top: 20px;
+            padding: 16px;
+            border-radius: 16px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.08);
+            color: #fecaca;
+        }
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.4);
+            border-top-color: white;
+            border-radius: 50%;
+            display: inline-block;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (max-width: 640px) {
+            .card { padding: 28px 22px; }
+            .actions { flex-direction: column; }
+            a { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <main class="card">
+        <div class="badge">Payment Status</div>
+        <h1>Payment not completed</h1>
+        <p id="status-text">The payment flow was not finished. You can try again from your menu tab.</p>
+        <div class="status-box" id="detail-box">
+            <span class="spinner"></span> Checking order status in case the payment completed after redirect.
+        </div>
+        <div class="actions">
+            <a id="retry-link" class="primary" href="../menu.html">Retry payment</a>
+            <a class="secondary" href="../index.html">Home</a>
+        </div>
+    </main>
+
+    <script>
+        const SUPABASE_URL = 'https://alcdglhmitibxzeltioi.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFsY2RnbGhtaXRpYnh6ZWx0aW9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM0ODc1MjgsImV4cCI6MjA4OTA2MzUyOH0.luW8aBhMU1RaelO2rqr2W51xdwD6htVgi7BIF7dR9d4';
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const params = new URLSearchParams(window.location.search);
+        let orderId = params.get('order_id') || params.get('orderId');
+        const table = params.get('table');
+
+        // Extract orderId from eSewa's base64 encoded data parameter if present
+        const dataParam = params.get('data');
+        if (!orderId && dataParam) {
+            try {
+                const decodedJson = JSON.parse(atob(dataParam));
+                if (decodedJson.transaction_uuid && decodedJson.transaction_uuid.length >= 36) {
+                    orderId = decodedJson.transaction_uuid.substring(0, 36);
+                }
+            } catch (err) {
+                console.error("Failed to decode eSewa data parameter:", err);
+            }
+        }
+
+        if (table) {
+            document.getElementById('retry-link').href = `../menu.html?table=${encodeURIComponent(table)}`;
+        }
+
+        function updateView(order) {
+            const paid = order && order.status === 'paid';
+            const statusText = document.getElementById('status-text');
+            const detailBox = document.getElementById('detail-box');
+
+            if (paid) {
+                statusText.textContent = 'The payment was completed successfully after the redirect.';
+                detailBox.innerHTML = `Order ${order.id ? order.id.substring(0, 8) + '...' : ''} is now marked as paid.`;
+                document.querySelector('h1').textContent = 'Payment successful';
+                document.querySelector('.badge').style.background = 'rgba(34, 197, 94, 0.16)';
+                document.querySelector('.badge').style.color = '#86efac';
+                return true;
+            }
+
+            return false;
+        }
+
+        async function loadOrder() {
+            try {
+                if (!window.supabase) {
+                    throw new Error("Supabase client failed to load. Please check your internet connection or disable adblockers.");
+                }
+
+                if (!orderId) {
+                    document.getElementById('status-text').textContent = 'Payment was cancelled or could not be verified.';
+                    document.getElementById('detail-box').textContent = 'No order id was provided in the return URL.';
+                    return;
+                }
+
+                const { data, error } = await supabase
+                    .from('orders')
+                .select('id, status, total_amount, due_amount, table_number')
+                .eq('id', orderId)
+                .single();
+
+            if (error) {
+                document.getElementById('status-text').textContent = 'We could not verify the order yet.';
+                document.getElementById('detail-box').textContent = error.message;
+                return;
+            }
+
+            const confirmed = updateView(data);
+            if (confirmed) return;
+
+            // Keep listening for the row update so a late success can flip this page into the confirmed state.
+            const channel = supabase
+                .channel(`payment_failure_${orderId}`)
+                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` }, payload => {
+                    if (updateView(payload.new)) {
+                        supabase.removeChannel(channel);
+                    }
+                })
+                .subscribe();
+            } catch (err) {
+                console.error("loadOrder error:", err);
+                document.getElementById('status-text').textContent = 'A temporary error occurred.';
+                document.getElementById('detail-box').textContent = err.message || 'Unable to check order status.';
+            }
+        }
+
+        loadOrder();
+    </script>
+</body>
+</html>

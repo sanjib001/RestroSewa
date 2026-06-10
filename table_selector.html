@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select Table for Manual Order</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #15100d;
+            --bg-panel: rgba(25, 18, 14, 0.84);
+            --bg-panel-soft: rgba(39, 28, 20, 0.65);
+            --text-main: #fff8f1;
+            --text-muted: #d8c6b8;
+            --accent: #f59e0b;
+            --accent-strong: #d97706;
+            --accent-secondary: #ef4444;
+            --line: rgba(255, 255, 255, 0.12);
+            --line-soft: rgba(255, 255, 255, 0.08);
+            --shadow: 0 28px 70px rgba(0, 0, 0, 0.4);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            padding: 24px;
+            font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+            color: var(--text-main);
+            background:
+                radial-gradient(circle at top left, rgba(245, 158, 11, 0.22), transparent 28%),
+                radial-gradient(circle at bottom right, rgba(239, 68, 68, 0.2), transparent 30%),
+                linear-gradient(135deg, #0f0b09 0%, #1e1511 48%, #120d0a 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        body::before,
+        body::after {
+            content: "";
+            position: fixed;
+            border-radius: 999px;
+            pointer-events: none;
+            filter: blur(6px);
+            z-index: 0;
+        }
+
+        body::before {
+            width: 280px;
+            height: 280px;
+            left: -80px;
+            top: 10%;
+            background: rgba(245, 158, 11, 0.13);
+        }
+
+        body::after {
+            width: 220px;
+            height: 220px;
+            right: -60px;
+            bottom: 6%;
+            background: rgba(239, 68, 68, 0.12);
+        }
+
+        .manual-shell {
+            width: 100%;
+            max-width: 1020px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .manual-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--line);
+            border-radius: 28px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            padding: 34px;
+        }
+
+        .manual-title {
+            margin: 0;
+            text-align: center;
+            font-family: 'Outfit', 'Inter', sans-serif;
+            font-size: clamp(1.9rem, 3vw, 2.6rem);
+            letter-spacing: -0.03em;
+        }
+
+        .manual-subtitle {
+            margin: 12px auto 0;
+            max-width: 60ch;
+            text-align: center;
+            color: var(--text-muted);
+            line-height: 1.65;
+        }
+
+        .category-stack {
+            margin-top: 26px;
+            display: grid;
+            gap: 16px;
+        }
+
+        .table-btn {
+            display: block;
+            width: 100%;
+            padding: 10px 15px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+            color: #fffaf5;
+            font-weight: 700;
+            text-align: center;
+            border-radius: 12px;
+            transition: transform 0.2s ease, filter 0.2s ease, box-shadow 0.2s ease;
+            text-decoration: none;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            box-shadow: 0 16px 28px rgba(245, 158, 11, 0.22);
+            letter-spacing: 0.02em;
+        }
+
+        .table-btn:hover {
+            filter: brightness(1.05);
+            transform: translateY(-1px);
+            box-shadow: 0 20px 36px rgba(245, 158, 11, 0.3);
+        }
+
+        .category-group {
+            padding: 16px;
+            border: 1px solid var(--line-soft);
+            border-radius: 18px;
+            background:
+                linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02)),
+                var(--bg-panel-soft);
+        }
+
+        .category-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--text-main);
+            margin-bottom: 12px;
+            border-bottom: 1px solid var(--line-soft);
+            padding-bottom: 8px;
+            letter-spacing: 0.02em;
+        }
+
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 12px;
+        }
+
+        .flexible-group {
+            border-color: rgba(245, 158, 11, 0.4);
+            background:
+                linear-gradient(180deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.03)),
+                rgba(33, 24, 18, 0.7);
+            margin-top: 8px;
+        }
+
+        .flexible-form {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+
+        .flexible-field {
+            flex: 1 1 260px;
+        }
+
+        .field-label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        #flexible-table-id {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 12px 14px;
+            font-size: 1rem;
+            text-transform: uppercase;
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-main);
+            outline: none;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        #flexible-table-id::placeholder {
+            color: rgba(255, 248, 241, 0.5);
+        }
+
+        #flexible-table-id:focus {
+            border-color: rgba(245, 158, 11, 0.75);
+            box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.16);
+        }
+
+        #flexible-order-btn {
+            max-width: 180px;
+        }
+
+        #flexible-order-btn:hover {
+            background: linear-gradient(135deg, var(--accent-strong), #dc2626);
+        }
+
+        .table-item {
+            display: flex;
+            gap: 6px;
+        }
+
+        .qr-btn {
+            padding: 10px 12px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-main);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-weight: 700;
+        }
+
+        .qr-btn:hover {
+            border-color: rgba(245, 158, 11, 0.6);
+            background: rgba(245, 158, 11, 0.18);
+        }
+
+        .qr-modal {
+            display: flex;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 9000;
+            justify-content: center;
+            align-items: center;
+            /* Hidden by default via class toggle — avoids Tailwind preflight conflicts */
+        }
+
+        .qr-modal.qr-hidden {
+            display: none !important;
+        }
+
+        .qr-modal-content {
+            background: linear-gradient(180deg, #fffaf5, #fff1e4);
+            padding: 30px;
+            border-radius: 18px;
+            text-align: center;
+            max-width: 430px;
+            width: 90%;
+            position: relative;
+            border: 1px solid rgba(80, 35, 10, 0.18);
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.35);
+        }
+
+        #qr-title {
+            margin: 0;
+            color: #341f13;
+            font-size: 1.4rem;
+            font-family: 'Outfit', 'Inter', sans-serif;
+        }
+
+        .qr-subtext {
+            margin-top: 6px;
+            color: #7b5b46;
+            font-size: 0.92rem;
+        }
+
+        #qr-canvas {
+            margin: 20px auto;
+            display: flex;
+            justify-content: center;
+        }
+
+        #qr-url-display {
+            color: #c2410c;
+            font-weight: 700;
+            margin-bottom: 14px;
+            font-family: 'Courier New', Courier, monospace;
+            word-break: break-all;
+        }
+
+        .print-btn {
+            background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+            color: white;
+            padding: 10px 20px;
+            border-radius: 10px;
+            font-weight: 700;
+            margin-top: 15px;
+            cursor: pointer;
+            border: none;
+            transition: filter 0.2s ease, transform 0.2s ease;
+        }
+
+        .print-btn:hover {
+            filter: brightness(1.04);
+            transform: translateY(-1px);
+        }
+
+        .close-qr {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            font-size: 24px;
+            cursor: pointer;
+            color: #855135;
+            transition: color 0.2s ease;
+        }
+
+        .close-qr:hover {
+            color: #5f2f16;
+        }
+
+        @media (max-width: 720px) {
+            body {
+                padding: 14px;
+            }
+
+            .manual-card {
+                padding: 22px;
+                border-radius: 22px;
+            }
+
+            .grid-container {
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            }
+
+            #flexible-order-btn {
+                max-width: 100%;
+            }
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="popups.js"></script>
+</head>
+
+<body>
+
+    <div class="manual-shell">
+        <div class="manual-card">
+            <h2 class="manual-title">Manual Order Entry</h2>
+            <p class="manual-subtitle">
+                Choose a preset table or use flexible entry for custom labels like Counter and Takeout.
+            </p>
+
+            <div class="category-stack">
+
+            <div class="category-group">
+                <div class="category-title">A Tables</div>
+                <div class="grid-container">
+                    <div class="table-item">
+                        <a href="menu.html?table=a1" class="table-btn">A1</a>
+                        <button onclick="showQR('A1')" class="qr-btn" title="Generate QR Code">QR</button>
+                    </div>
+                    <div class="table-item">
+                        <a href="menu.html?table=a2" class="table-btn">A2</a>
+                        <button onclick="showQR('A2')" class="qr-btn" title="Generate QR Code">QR</button>
+                    </div>
+                    <div class="table-item">
+                        <a href="menu.html?table=a3" class="table-btn">A3</a>
+                        <button onclick="showQR('A3')" class="qr-btn" title="Generate QR Code">QR</button>
+                    </div>
+                    <div class="table-item">
+                        <a href="menu.html?table=a4" class="table-btn">A4</a>
+                        <button onclick="showQR('A4')" class="qr-btn" title="Generate QR Code">QR</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="category-group">
+                <div class="category-title">B Tables</div>
+                <div class="grid-container">
+                    <div class="table-item">
+                        <a href="menu.html?table=b1" class="table-btn">B1</a>
+                        <button onclick="showQR('B1')" class="qr-btn">QR</button>
+                    </div>
+                    <div class="table-item">
+                        <a href="menu.html?table=b2" class="table-btn">B2</a>
+                        <button onclick="showQR('B2')" class="qr-btn">QR</button>
+                    </div>
+                    <div class="table-item">
+                        <a href="menu.html?table=b3" class="table-btn">B3</a>
+                        <button onclick="showQR('B3')" class="qr-btn">QR</button>
+                    </div>
+                    <div class="table-item">
+                        <a href="menu.html?table=b4" class="table-btn">B4</a>
+                        <button onclick="showQR('B4')" class="qr-btn">QR</button>
+                    </div>
+                    <div class="table-item">
+                        <a href="menu.html?table=b5" class="table-btn">B5</a>
+                        <button onclick="showQR('B5')" class="qr-btn">QR</button>
+                    </div>
+                    <div class="table-item">
+                        <a href="menu.html?table=b6" class="table-btn">B6</a>
+                        <button onclick="showQR('B6')" class="qr-btn">QR</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="category-group">
+                <div class="category-title">C Tables</div>
+                <div class="grid-container">
+                    <div class="table-item">
+                        <a href="menu.html?table=c1" class="table-btn">C1</a>
+                        <button onclick="showQR('C1')" class="qr-btn">QR</button>
+                    </div>
+                    <div class="table-item">
+                        <a href="menu.html?table=c2" class="table-btn">C2</a>
+                        <button onclick="showQR('C2')" class="qr-btn">QR</button>
+                    </div>
+                    <div class="table-item">
+                        <a href="menu.html?table=c3" class="table-btn">C3</a>
+                        <button onclick="showQR('C3')" class="qr-btn">QR</button>
+                    </div>
+                    <div class="table-item">
+                        <a href="menu.html?table=c4" class="table-btn">C4</a>
+                        <button onclick="showQR('C4')" class="qr-btn">QR</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="category-group">
+                <div class="category-title">D Tables</div>
+                <div class="grid-container">
+                    <div class="table-item">
+                        <a href="menu.html?table=d1" class="table-btn">D1</a>
+                        <button onclick="showQR('D1')" class="qr-btn">QR</button>
+                    </div>
+                    <div class="table-item">
+                        <a href="menu.html?table=d2" class="table-btn">D2</a>
+                        <button onclick="showQR('D2')" class="qr-btn">QR</button>
+                    </div>
+                    <div class="table-item">
+                        <a href="menu.html?table=d3" class="table-btn">D3</a>
+                        <button onclick="showQR('D3')" class="qr-btn">QR</button>
+                    </div>
+                    <div class="table-item">
+                        <a href="menu.html?table=d4" class="table-btn">D4</a>
+                        <button onclick="showQR('D4')" class="qr-btn">QR</button>
+                    </div>
+                    <div class="table-item">
+                        <a href="menu.html?table=d5" class="table-btn">D5</a>
+                        <button onclick="showQR('D5')" class="qr-btn">QR</button>
+                    </div>
+                    <div class="table-item">
+                        <a href="menu.html?table=d6" class="table-btn">D6</a>
+                        <button onclick="showQR('D6')" class="qr-btn">QR</button>
+                    </div>
+                </div>
+            </div>
+
+
+        </div>
+
+                <div class="category-group flexible-group">
+                    <div class="category-title">Flexible Table Entry (e.g., E1, Z9, Counter, Takeout)</div>
+
+                    <form id="flexible-order-form" class="flexible-form">
+                        <div class="flexible-field">
+                            <label for="flexible-table-id" class="field-label">Enter Table Number</label>
+                            <input type="text" id="flexible-table-id" name="flexible-table-id" placeholder="E1, Z9, or Counter"
+                                required>
+                        </div>
+
+                        <button type="submit" id="flexible-order-btn" class="table-btn">
+                            Go to Menu
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- QR Code Modal -->
+    <div id="qr-modal" class="qr-modal qr-hidden">
+        <div class="qr-modal-content">
+            <span class="close-qr" onclick="closeQR()">&times;</span>
+            <h3 id="qr-title">Table QR Code</h3>
+            <p class="qr-subtext">Scan to open the menu for this table</p>
+
+            <div id="qr-canvas"></div>
+
+            <p id="qr-url-display"></p>
+
+            <button type="button" onclick="printQR()" class="print-btn">🖨️ Print QR Code</button>
+        </div>
+    </div>
+
+    <script>
+        let currentQRCode = null;
+
+        function showQR(tableId) {
+            var modal      = document.getElementById('qr-modal');
+            var qrCanvas   = document.getElementById('qr-canvas');
+            var qrTitle    = document.getElementById('qr-title');
+            var qrUrlDisplay = document.getElementById('qr-url-display');
+
+            qrTitle.textContent = 'QR Code for Table ' + tableId;
+            qrCanvas.innerHTML  = ''; // Clear previous
+
+            // Build the full menu URL relative to current page location
+            var href    = window.location.href;
+            var baseUrl = href.substring(0, href.lastIndexOf('/'));
+            var fullUrl = baseUrl + '/menu.html?table=' + tableId.toLowerCase();
+            qrUrlDisplay.textContent = fullUrl;
+
+            // Show modal FIRST so canvas has dimensions
+            modal.classList.remove('qr-hidden');
+
+            try {
+                if (typeof QRCode !== 'undefined') {
+                    currentQRCode = new QRCode(qrCanvas, {
+                        text:         fullUrl,
+                        width:        240,
+                        height:       240,
+                        colorDark:   '#000000',
+                        colorLight:  '#ffffff',
+                        correctLevel: QRCode.CorrectLevel.H
+                    });
+                } else {
+                    throw new Error('QRCode library not loaded');
+                }
+            } catch (e) {
+                // Fallback: free QR image API
+                var img    = document.createElement('img');
+                img.src    = 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=' + encodeURIComponent(fullUrl);
+                img.width  = 240;
+                img.height = 240;
+                img.alt    = 'QR Code for Table ' + tableId;
+                img.style.display = 'block';
+                img.style.margin  = '0 auto';
+                qrCanvas.appendChild(img);
+            }
+        }
+
+        function closeQR() {
+            document.getElementById('qr-modal').classList.add('qr-hidden');
+        }
+
+        function printQR() {
+            var imgs       = document.getElementById('qr-canvas').getElementsByTagName('img');
+            var tableTitle = document.getElementById('qr-title').textContent;
+
+            if (!imgs || imgs.length === 0) {
+                alert('⚠️ QR code is not ready yet. Please wait a moment and try again.');
+                return;
+            }
+
+            // Build print HTML using string concatenation — avoids any embedded script tag
+            // parsing issues that can occur inside template literals.
+            var printWindow = window.open('', '_blank');
+            printWindow.document.write(
+                '<!DOCTYPE html><html><head>' +
+                '<title>Print QR - ' + tableTitle + '</title>' +
+                '<style>' +
+                'body{font-family:sans-serif;text-align:center;padding:50px;}' +
+                'img{width:300px;height:300px;display:block;margin:20px auto;}' +
+                'h1{font-size:24px;margin-bottom:10px;}' +
+                'p{font-size:14px;color:#666;}' +
+                '</style>' +
+                '</head><body>' +
+                '<h1>' + tableTitle + '</h1>' +
+                '<p>The Chakra Restaurant &mdash; Scan to Order</p>' +
+                '<img src="' + imgs[0].src + '" alt="QR Code">' +
+                '<p>Scan this code to view our menu and place your order.</p>' +
+                '</body></html>'
+            );
+            printWindow.document.close();
+            // Trigger print from parent after a short delay (no embedded script needed)
+            setTimeout(function() {
+                printWindow.focus();
+                printWindow.print();
+            }, 500);
+        }
+
+        document.getElementById('flexible-order-form').addEventListener('submit', function(event) {
+            event.preventDefault();
+            var tableInput = document.getElementById('flexible-table-id').value.trim();
+            if (tableInput) {
+                window.location.href = 'menu.html?table=' + encodeURIComponent(tableInput.toLowerCase());
+            } else {
+                alert('⚠️ Please enter a Table ID.');
+            }
+        });
+
+        // Close modal when clicking the dark backdrop (outside the white card)
+        document.getElementById('qr-modal').addEventListener('click', function(event) {
+            if (event.target === this) {
+                closeQR();
+            }
+        });
+    </script>
+
+</body>
+
+</html>
