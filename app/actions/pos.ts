@@ -3,10 +3,10 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { hasPermission, PERMISSIONS } from "@/lib/permissions";
+import { hasPermission, PERMISSIONS, NAV_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
-import { buildVisibilityFilter } from "@/lib/assignments";
-import type { StaffViewer } from "@/lib/assignments";
+import { buildVisibilityFilter, getAssignedWorkstationIds } from "@/lib/assignments";
+import { emitNewOrderNotification } from "@/lib/notify";
 
 export type ActionResult = { error: string } | null;
 
@@ -44,12 +44,6 @@ export type SessionDetail = {
   customer_pin: string | null;
   items: OrderItemRow[];
   total: number;
-};
-
-export type QueueItem = OrderItemRow & {
-  table_number: string | null;
-  room_number: string | null;
-  session_type: string | null;
 };
 
 export type CartItem = {
@@ -335,6 +329,24 @@ export async function submitOrder(
 
   if (itemsErr) return { error: "Failed to add items." };
 
+  // Alert the kitchen/bar/bakery (and non-workstation staff) that an order was
+  // placed. Routing to the right workstation happens on read.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: sess } = await (service as any)
+    .from("sessions")
+    .select("table_id, room_id")
+    .eq("id", sessionId)
+    .maybeSingle();
+  await emitNewOrderNotification(service, {
+    restaurantId: ru.restaurant_id,
+    sessionId,
+    orderId: order.id,
+    tableId: sess?.table_id ?? null,
+    roomId: sess?.room_id ?? null,
+  });
+
+  revalidatePath("/employee/queue");
+  revalidatePath("/employee/notifications");
   redirect(`/employee/session/${sessionId}`);
 }
 
@@ -343,14 +355,61 @@ export async function submitOrder(
 export async function updateOrderItemStatus(
   itemId: string,
   status: "pending" | "ready" | "served"
-) {
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+
+  // Only staff allowed to work orders may advance item status.
+  if (!NAV_ACCESS.canManageOrders(ru)) {
+    return { error: "You don't have permission to update orders." };
+  }
+
   const service = createServiceClient();
+
+  // Resolve the item → order → session so we can enforce restaurant ownership
+  // and table-group visibility (a staff member can't touch another group's items).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: item } = await (service as any)
+    .from("session_order_items")
+    .select("id, order_id")
+    .eq("id", itemId)
+    .maybeSingle();
+  if (!item) return { error: "Item not found." };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: order } = await (service as any)
+    .from("session_orders")
+    .select("session_id, restaurant_id")
+    .eq("id", item.order_id)
+    .maybeSingle();
+  if (!order || order.restaurant_id !== ru.restaurant_id) {
+    return { error: "Permission denied." };
+  }
+
+  const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
+  if (!visibility.seesAll) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: session } = await (service as any)
+      .from("sessions")
+      .select("table_id, room_id")
+      .eq("id", order.session_id)
+      .maybeSingle();
+    if (
+      !session ||
+      !visibility.canSeeTable(session.table_id ?? null) ||
+      !visibility.canSeeRoom(session.room_id ?? null)
+    ) {
+      return { error: "Permission denied." };
+    }
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (service as any)
     .from("session_order_items")
     .update({ item_status: status })
     .eq("id", itemId);
   revalidatePath("/employee/queue");
+  revalidatePath(`/employee/session/${order.session_id}`);
+  return null;
 }
 
 // ─── Close Session with Payment ───────────────────────────────────────────────
@@ -514,169 +573,259 @@ export async function forceCloseSession(sessionId: string): Promise<ActionResult
   redirect("/employee/dashboard");
 }
 
-// ─── Workstation Queue ────────────────────────────────────────────────────────
+// ─── Order Queue (grouped by order, for the staff working queue) ──────────────
+// Returns each active order the viewer is allowed to see (by table-group), with
+// its table/room/customer context, every item on the order, and an aggregate
+// status. This is the primary staff working queue. Self-authing: derives the
+// viewer from the session so it can be safely polled from the client.
 
-export async function getWorkstationQueue(
-  restaurantId: string
-): Promise<QueueItem[]> {
-  const service = createServiceClient();
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: items } = await (service as any)
-    .from("session_order_items")
-    .select(
-      "id, item_name, item_price, workstation_name, quantity, item_status, notes, created_at, order_id"
-    )
-    .eq("restaurant_id", restaurantId)
-    .in("item_status", ["pending", "ready"])
-    .order("created_at");
-
-  if (!items?.length) return [];
-
-  // Fetch session info for table numbers
-  const orderIds = [...new Set((items as OrderItemRow[]).map((i) => i.order_id))];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: orders } = await (service as any)
-    .from("session_orders")
-    .select("id, session_id")
-    .in("id", orderIds);
-
-  const sessionIds = [...new Set(((orders ?? []) as { id: string; session_id: string }[]).map((o) => o.session_id))];
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: sessions } = await (service as any)
-    .from("sessions")
-    .select("id, type, table_id, room_id, restaurant_tables ( number ), rooms ( number )")
-    .in("id", sessionIds)
-    .eq("status", "active");
-
-  const orderMap = new Map(((orders ?? []) as { id: string; session_id: string }[]).map((o) => [o.id, o.session_id]));
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sessionMap = new Map(((sessions ?? []) as any[]).map((s) => [s.id, s]));
-
-  return (items as OrderItemRow[])
-    .filter((item) => {
-      const sid = orderMap.get(item.order_id);
-      return sid && sessionMap.has(sid);
-    })
-    .map((item) => {
-      const sid = orderMap.get(item.order_id)!;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const session = sessionMap.get(sid) as any;
-      return {
-        ...item,
-        table_number: session?.restaurant_tables?.number ?? null,
-        room_number: session?.rooms?.number ?? null,
-        session_type: session?.type ?? null,
-      };
-    });
-}
-
-// ─── My Orders (filtered by assigned table groups) ────────────────────────────
-// A staff member sees the pending/ready items only for tables in the table
-// groups they are assigned to. Admins and table managers see everything.
-// Walk-in (table-less) sessions have no group boundary and stay visible to all.
-
-export async function getMyOrders(viewer: StaffViewer & { restaurant_id: string }): Promise<QueueItem[]> {
-  const restaurantId = viewer.restaurant_id;
-  const service = createServiceClient();
-
-  const visibility = await buildVisibilityFilter(restaurantId, viewer);
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: items } = await (service as any)
-    .from("session_order_items")
-    .select("id, item_name, item_price, workstation_name, quantity, item_status, notes, created_at, order_id")
-    .eq("restaurant_id", restaurantId)
-    .in("item_status", ["pending", "ready"])
-    .order("created_at");
-
-  if (!items?.length) return [];
-
-  const orderIds = [...new Set((items as OrderItemRow[]).map((i) => i.order_id))];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: orders } = await (service as any)
-    .from("session_orders")
-    .select("id, session_id")
-    .in("id", orderIds);
-
-  const sessionIds = [...new Set(((orders ?? []) as { id: string; session_id: string }[]).map((o) => o.session_id))];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: sessions } = await (service as any)
-    .from("sessions")
-    .select("id, type, table_id, room_id, restaurant_tables ( number ), rooms ( number )")
-    .in("id", sessionIds)
-    .eq("status", "active");
-
-  const orderMap = new Map(((orders ?? []) as { id: string; session_id: string }[]).map((o) => [o.id, o.session_id]));
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sessionMap = new Map(((sessions ?? []) as any[]).map((s) => [s.id, s]));
-
-  return (items as OrderItemRow[])
-    .filter((item) => {
-      const sid = orderMap.get(item.order_id);
-      if (!sid || !sessionMap.has(sid)) return false;
-      if (visibility.seesAll) return true;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const session = sessionMap.get(sid) as any;
-      return (
-        visibility.canSeeTable(session?.table_id ?? null) &&
-        visibility.canSeeRoom(session?.room_id ?? null)
-      );
-    })
-    .map((item) => {
-      const sid = orderMap.get(item.order_id)!;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const session = sessionMap.get(sid) as any;
-      return {
-        ...item,
-        table_number: session?.restaurant_tables?.number ?? null,
-        room_number: session?.rooms?.number ?? null,
-        session_type: session?.type ?? null,
-      };
-    });
-}
-
-// ─── Recent Sales ─────────────────────────────────────────────────────────────
-
-export type PaymentRow = {
+export type QueueOrderItem = {
   id: string;
-  total_amount: number;
-  payment_method: string;
+  item_name: string;
+  quantity: number;
+  item_status: "pending" | "ready" | "served";
+  notes: string | null;
+  workstation_name: string | null;
+  item_price: number;
+};
+
+export type QueueOrder = {
+  order_id: string;
+  session_id: string;
+  table_number: string | null;
+  room_number: string | null;
+  session_type: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  created_at: string;
+  items: QueueOrderItem[];
+  status: "pending" | "ready" | "served";
+  total: number;
+};
+
+export async function getMyOrderQueue(): Promise<QueueOrder[]> {
+  const ru = await getRestaurantUser();
+  const restaurantId = ru.restaurant_id;
+  const service = createServiceClient();
+
+  const visibility = await buildVisibilityFilter(restaurantId, ru);
+
+  // Workstation routing: staff with assigned workstations (kitchen/bar/bakery)
+  // only work items for those workstations, restaurant-wide. Admins/managers
+  // (seesAll) always see full orders regardless of any workstation assignment.
+  const myWorkstations = await getAssignedWorkstationIds(ru.id);
+  const isWorkstationStaff = !visibility.seesAll && myWorkstations.size > 0;
+
+  // session_order_items has no restaurant_id, so scope through active sessions →
+  // their orders → the order items.
+  // 1. Active sessions for this restaurant (+ table/room/customer context).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: sessions } = await (service as any)
+    .from("sessions")
+    .select("id, type, table_id, room_id, credit_customer_id, restaurant_tables ( number ), rooms ( number ), credit_customers ( name, phone )")
+    .eq("restaurant_id", restaurantId)
+    .eq("status", "active");
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sessionMap = new Map(((sessions ?? []) as any[]).map((s) => [s.id, s]));
+  const sessionIds = [...sessionMap.keys()];
+  if (sessionIds.length === 0) return [];
+
+  // 2. Orders on those sessions.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: orders } = await (service as any)
+    .from("session_orders")
+    .select("id, session_id, created_at")
+    .in("session_id", sessionIds);
+
+  const orderIds = [...new Set(((orders ?? []) as { id: string }[]).map((o) => o.id))];
+  if (orderIds.length === 0) return [];
+
+  // 3. All items for those orders.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: items } = await (service as any)
+    .from("session_order_items")
+    .select("id, order_id, item_name, quantity, item_status, notes, workstation_id, workstation_name, item_price, created_at")
+    .in("order_id", orderIds)
+    .order("created_at");
+
+  const orderMeta = new Map(
+    ((orders ?? []) as { id: string; session_id: string; created_at: string }[]).map((o) => [
+      o.id,
+      o,
+    ])
+  );
+
+  // An order is "in the queue" only while it still has a pending/ready item.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const activeOrderIds = [
+    ...new Set(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((items ?? []) as any[])
+        .filter((it) => it.item_status === "pending" || it.item_status === "ready")
+        .map((it) => it.order_id)
+    ),
+  ];
+  if (activeOrderIds.length === 0) return [];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const itemsByOrder = new Map<string, any[]>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const it of (items ?? []) as any[]) {
+    if (!itemsByOrder.has(it.order_id)) itemsByOrder.set(it.order_id, []);
+    itemsByOrder.get(it.order_id)!.push(it);
+  }
+
+  const result: QueueOrder[] = [];
+  for (const orderId of activeOrderIds) {
+    const meta = orderMeta.get(orderId);
+    if (!meta) continue;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const session = sessionMap.get(meta.session_id) as any;
+    if (!session) continue; // session closed / not active → drop from queue
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let rawItems = (itemsByOrder.get(orderId) ?? []) as any[];
+
+    if (visibility.seesAll) {
+      // Admins / managers: the whole order, every workstation.
+    } else if (isWorkstationStaff) {
+      // Workstation staff: only their workstation's items, across all tables.
+      // Keep the same order but show just the slice they're responsible for.
+      rawItems = rawItems.filter(
+        (it) => it.workstation_id && myWorkstations.has(it.workstation_id)
+      );
+      // Only surface the order if it still has actionable work for them.
+      if (!rawItems.some((it) => it.item_status === "pending" || it.item_status === "ready")) {
+        continue;
+      }
+    } else {
+      // Non-workstation staff (waiter/supervisor): full order, but only for the
+      // table groups they're assigned to.
+      if (!(visibility.canSeeTable(session.table_id ?? null) && visibility.canSeeRoom(session.room_id ?? null))) {
+        continue;
+      }
+    }
+
+    if (rawItems.length === 0) continue;
+
+    const orderItems: QueueOrderItem[] = rawItems.map((it) => ({
+      id: it.id,
+      item_name: it.item_name,
+      quantity: it.quantity,
+      item_status: it.item_status,
+      notes: it.notes,
+      workstation_name: it.workstation_name,
+      item_price: Number(it.item_price),
+    }));
+
+    const anyPending = orderItems.some((i) => i.item_status === "pending");
+    const anyReady = orderItems.some((i) => i.item_status === "ready");
+    const status: QueueOrder["status"] = anyPending ? "pending" : anyReady ? "ready" : "served";
+
+    result.push({
+      order_id: orderId,
+      session_id: meta.session_id,
+      table_number: session.restaurant_tables?.number ?? null,
+      room_number: session.rooms?.number ?? null,
+      session_type: session.type ?? null,
+      customer_name: session.credit_customers?.name ?? null,
+      customer_phone: session.credit_customers?.phone ?? null,
+      created_at: meta.created_at,
+      items: orderItems,
+      status,
+      total: orderItems.reduce((s, i) => s + i.item_price * i.quantity, 0),
+    });
+  }
+
+  // Oldest orders first — the queue works FIFO.
+  result.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  return result;
+}
+
+// ─── Sales Summary ────────────────────────────────────────────────────────────
+// Aggregates the existing payments data into the figures the Sales screen needs.
+// No duplicate records are created — everything is derived from `payments`.
+
+export type SalesTxn = {
+  id: string;
+  amount: number;
+  method: string;
   cash_amount: number;
   online_amount: number;
   created_at: string;
   table_number: string | null;
   room_number: string | null;
   session_type: string | null;
+  customer_name: string | null;
 };
 
-export async function getRecentSales(
-  restaurantId: string,
-  limit = 50
-): Promise<PaymentRow[]> {
+export type SalesSummary = {
+  total: number;
+  today: number;
+  week: number;
+  month: number;
+  orderCount: number;
+  avgOrderValue: number;
+  breakdown: { cash: number; online: number; card: number; other: number };
+  transactions: SalesTxn[];
+};
+
+export async function getSalesSummary(restaurantId: string): Promise<SalesSummary> {
   const service = createServiceClient();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (service as any)
     .from("payments")
-    .select("id, total_amount, payment_method, cash_amount, online_amount, created_at, sessions ( type, restaurant_tables ( number ), rooms ( number ) )")
+    .select("id, amount, total_amount, cash_amount, online_amount, payment_method, created_at, sessions ( type, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) )")
     .eq("restaurant_id", restaurantId)
-    .order("created_at", { ascending: false })
-    .limit(limit);
-
-  if (!data) return [];
+    .order("created_at", { ascending: false });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (data as any[]).map((p) => ({
+  const rows = (data ?? []) as any[];
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const weekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+  let total = 0, today = 0, week = 0, month = 0;
+  const breakdown = { cash: 0, online: 0, card: 0, other: 0 };
+
+  for (const p of rows) {
+    const value = Number(p.total_amount ?? p.amount ?? 0);
+    const cash = Number(p.cash_amount ?? 0);
+    const online = Number(p.online_amount ?? 0);
+    const ts = new Date(p.created_at).getTime();
+
+    total += value;
+    if (ts >= startOfToday) today += value;
+    if (ts >= weekAgo) week += value;
+    if (ts >= startOfMonth) month += value;
+
+    // cash/online/mixed rows carry the split in cash_amount/online_amount.
+    // card/upi/other legacy rows carry the whole value under amount.
+    breakdown.cash += cash;
+    breakdown.online += online;
+    if (p.payment_method === "card") breakdown.card += value;
+    else if (p.payment_method === "upi" || p.payment_method === "other") breakdown.other += value;
+  }
+
+  const orderCount = rows.length;
+  const avgOrderValue = orderCount > 0 ? total / orderCount : 0;
+
+  const transactions: SalesTxn[] = rows.slice(0, 25).map((p) => ({
     id: p.id,
-    total_amount: p.total_amount,
-    payment_method: p.payment_method,
-    cash_amount: p.cash_amount,
-    online_amount: p.online_amount,
+    amount: Number(p.total_amount ?? p.amount ?? 0),
+    method: p.payment_method,
+    cash_amount: Number(p.cash_amount ?? 0),
+    online_amount: Number(p.online_amount ?? 0),
     created_at: p.created_at,
     table_number: p.sessions?.restaurant_tables?.number ?? null,
     room_number: p.sessions?.rooms?.number ?? null,
     session_type: p.sessions?.type ?? null,
+    customer_name: p.sessions?.credit_customers?.name ?? null,
   }));
+
+  return { total, today, week, month, orderCount, avgOrderValue, breakdown, transactions };
 }

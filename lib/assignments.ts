@@ -41,6 +41,22 @@ export function viewerSeesAllGroups(viewer: StaffViewer): boolean {
   );
 }
 
+// ─── Workstation assignment ───────────────────────────────────────────────────
+// Kitchen/Bar/Bakery staff are assigned one or more WORKSTATIONS. When a staff
+// member has ≥1 workstation they are "workstation staff": they only work items
+// routed to their workstation(s), restaurant-wide (a kitchen cooks for every
+// table). Staff with no workstation (waiter/supervisor/manager) are unaffected
+// and keep seeing full orders per their table-group / permissions.
+export async function getAssignedWorkstationIds(userId: string): Promise<Set<string>> {
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("restaurant_user_workstations")
+    .select("workstation_id")
+    .eq("restaurant_user_id", userId);
+  return new Set(((data ?? []) as { workstation_id: string }[]).map((r) => r.workstation_id));
+}
+
 export async function buildVisibilityFilter(
   restaurantId: string,
   viewer: StaffViewer

@@ -2,8 +2,9 @@
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
-import { buildVisibilityFilter } from "@/lib/assignments";
+import { buildVisibilityFilter, getAssignedWorkstationIds } from "@/lib/assignments";
 import type { StaffViewer } from "@/lib/assignments";
+import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 
 export type NotificationType = "call_waiter" | "request_bill" | "new_order";
 
@@ -31,7 +32,7 @@ export async function getActiveNotifications(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (service as any)
     .from("notifications")
-    .select("id, type, status, table_id, room_id, session_id, created_at, acknowledged_at, restaurant_tables ( number ), rooms ( number )")
+    .select("id, type, status, table_id, room_id, session_id, order_id, created_at, acknowledged_at, restaurant_tables ( number ), rooms ( number )")
     .eq("restaurant_id", restaurantId)
     .in("status", ["new", "acknowledged"])
     .order("created_at", { ascending: false });
@@ -39,12 +40,55 @@ export async function getActiveNotifications(
   if (!data) return [];
 
   const visibility = await buildVisibilityFilter(restaurantId, viewer);
+  const myWorkstations = await getAssignedWorkstationIds(viewer.id);
+  const isWorkstationStaff = !visibility.seesAll && myWorkstations.size > 0;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows = (data as any[]).filter(
-    (n) =>
-      visibility.seesAll ||
-      (visibility.canSeeTable(n.table_id) && visibility.canSeeRoom(n.room_id))
-  );
+  let rows: any[];
+
+  if (isWorkstationStaff) {
+    // Workstation staff (kitchen/bar/bakery) are alerted only for orders that
+    // contain an item routed to their workstation — restaurant-wide, so table
+    // groups don't apply. Service calls (waiter/bill) are for front staff, not
+    // the kitchen, so they're excluded here.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const orderIds = [
+      ...new Set(
+        (data as any[])
+          .filter((n) => n.type === "new_order" && n.order_id)
+          .map((n) => n.order_id as string)
+      ),
+    ];
+
+    const orderWorkstations = new Map<string, Set<string>>();
+    if (orderIds.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: its } = await (service as any)
+        .from("session_order_items")
+        .select("order_id, workstation_id")
+        .in("order_id", orderIds);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const it of (its ?? []) as any[]) {
+        if (!orderWorkstations.has(it.order_id)) orderWorkstations.set(it.order_id, new Set());
+        if (it.workstation_id) orderWorkstations.get(it.order_id)!.add(it.workstation_id);
+      }
+    }
+
+    rows = (data as any[]).filter((n) => {
+      if (n.type !== "new_order" || !n.order_id) return false;
+      const ws = orderWorkstations.get(n.order_id);
+      if (!ws) return false;
+      for (const w of myWorkstations) if (ws.has(w)) return true;
+      return false;
+    });
+  } else {
+    // Non-workstation staff: existing table-group routing.
+    rows = (data as any[]).filter(
+      (n) =>
+        visibility.seesAll ||
+        (visibility.canSeeTable(n.table_id) && visibility.canSeeRoom(n.room_id))
+    );
+  }
 
   return rows.map((n) => ({
     id: n.id,
@@ -64,31 +108,24 @@ export async function getNotificationCount(
   restaurantId: string,
   viewer: NotificationViewer
 ): Promise<number> {
-  const service = createServiceClient();
+  // Derive from the same routing (table-group + workstation) used to display
+  // notifications, so the badge always matches what the staff member can see.
+  const items = await getActiveNotifications(restaurantId, viewer);
+  return items.filter((n) => n.status === "new").length;
+}
 
-  const visibility = await buildVisibilityFilter(restaurantId, viewer);
-  if (visibility.seesAll) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { count } = await (service as any)
-      .from("notifications")
-      .select("id", { count: "exact", head: true })
-      .eq("restaurant_id", restaurantId)
-      .eq("status", "new");
-    return count ?? 0;
-  }
-
-  // Non-managers: only count notifications routed to their table groups.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (service as any)
-    .from("notifications")
-    .select("table_id, room_id")
-    .eq("restaurant_id", restaurantId)
-    .eq("status", "new");
-
-  const rows = (data ?? []) as { table_id: string | null; room_id: string | null }[];
-  return rows.filter(
-    (n) => visibility.canSeeTable(n.table_id) && visibility.canSeeRoom(n.room_id)
-  ).length;
+// Self-authing poll endpoint for the client. Derives the viewer from the
+// session (never trusts client input) and returns the notifications visible to
+// them plus the count of unacknowledged ones — used to drive the live badge and
+// new-order/waiter-call alerts without a page refresh.
+export async function getMyNotifications(): Promise<{
+  items: NotificationRow[];
+  count: number;
+}> {
+  const ru = await getRestaurantUser();
+  const items = await getActiveNotifications(ru.restaurant_id, ru);
+  const count = items.filter((n) => n.status === "new").length;
+  return { items, count };
 }
 
 export async function acknowledgeNotification(id: string): Promise<void> {

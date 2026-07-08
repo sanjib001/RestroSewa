@@ -1,7 +1,7 @@
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getNotificationCount } from "@/app/actions/notifications";
-import { hasPermission, PERMISSIONS } from "@/lib/permissions";
+import { getStaffNav } from "@/lib/permissions";
 import { StaffNav } from "./employee/_components/staff-nav";
 
 export default async function EmployeeLayout({ children }: { children: React.ReactNode }) {
@@ -16,9 +16,15 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
     .single();
 
   const notificationCount = await getNotificationCount(restaurantUser.restaurant_id, restaurantUser);
-  const canManageMenu =
-    restaurantUser.role === "restaurant_admin" ||
-    hasPermission(restaurantUser, PERMISSIONS.MANAGE_MENU);
+
+  // Navigation is derived entirely from the staff member's permissions so the
+  // visible items always match the backend route guards.
+  const navItems = getStaffNav(restaurantUser).map(({ key, label, href, exact }) => ({
+    key,
+    label,
+    href,
+    exact,
+  }));
 
   return (
     <div className="min-h-screen" style={{ background: "var(--color-canvas-soft)" }}>
@@ -26,7 +32,7 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
         restaurantName={restaurant?.name ?? "Restaurant"}
         displayName={restaurantUser.display_name}
         notificationCount={notificationCount}
-        canManageMenu={canManageMenu}
+        navItems={navItems}
       />
       <main>{children}</main>
     </div>
