@@ -51,23 +51,30 @@ export function StaffNav({
   restaurantName,
   displayName,
   notificationCount = 0,
+  orderCount = 0,
   navItems,
 }: {
   restaurantName: string;
   displayName: string;
   notificationCount?: number;
+  orderCount?: number;
   navItems: NavItem[];
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
-  const [count, setCount] = useState(notificationCount);
+  // Two independent unread counts, both from the same poll: service calls
+  // (waiter/bill) drive the Notifications badge, new orders drive the Orders badge.
+  const [serviceCount, setServiceCount] = useState(notificationCount);
+  const [orderBadge, setOrderBadge] = useState(orderCount);
   const [toasts, setToasts] = useState<{ id: string; label: string; color: string; Icon: React.ComponentType<{ size?: number }> }[]>([]);
   // Track which notification ids we've already seen so we only alert on new ones.
   const seenIds = useRef<Set<string> | null>(null);
 
-  const showNotifBadge = navItems.some((n) => n.key === "notifications");
+  // While viewing the queue, the staff member is actively seeing new orders, so
+  // the Orders badge reads 0 (the server marks them seen on the queue page).
+  const onOrdersPage = pathname.startsWith("/employee/queue");
 
   const dismiss = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -78,11 +85,13 @@ export function StaffNav({
 
     async function poll() {
       try {
-        const { items, count: newCount } = await getMyNotifications();
+        const { items } = await getMyNotifications();
         if (!active) return;
-        setCount(newCount);
 
         const newRows = items.filter((n) => n.status === "new");
+        setServiceCount(newRows.filter((n) => n.type !== "new_order").length);
+        setOrderBadge(newRows.filter((n) => n.type === "new_order").length);
+
         if (seenIds.current === null) {
           // First poll: seed the baseline without alerting for pre-existing items.
           seenIds.current = new Set(newRows.map((n) => n.id));
@@ -152,7 +161,12 @@ export function StaffNav({
           {navItems.map(({ key, label, href, exact }) => {
             const Icon = ICONS[key];
             const active = exact ? pathname === href : pathname.startsWith(href);
-            const showBadge = key === "notifications" && showNotifBadge && count > 0;
+            const badge =
+              key === "notifications"
+                ? serviceCount
+                : key === "orders"
+                ? (onOrdersPage ? 0 : orderBadge)
+                : 0;
             return (
               <Link
                 key={href}
@@ -165,12 +179,12 @@ export function StaffNav({
               >
                 <Icon size={15} strokeWidth={1.5} />
                 <span className="hidden xs:inline sm:inline">{label}</span>
-                {showBadge && (
+                {badge > 0 && (
                   <span
                     className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-medium flex items-center justify-center"
                     style={{ background: "#ef4444", color: "#fff" }}
                   >
-                    {count > 9 ? "9+" : count}
+                    {badge > 9 ? "9+" : badge}
                   </span>
                 )}
               </Link>

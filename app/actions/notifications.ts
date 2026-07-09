@@ -128,6 +128,27 @@ export async function getMyNotifications(): Promise<{
   return { items, count };
 }
 
+// Marks the viewer's currently-visible new-order alerts as seen (acknowledged),
+// so the Orders badge clears once they open the queue. Only the notifications
+// the viewer is allowed to see (table-group + workstation routed) are touched;
+// it never affects other staff's badges. Does not remove orders from the queue
+// itself (that's driven by item status).
+export async function markMyOrdersSeen(): Promise<void> {
+  const ru = await getRestaurantUser();
+  const items = await getActiveNotifications(ru.restaurant_id, ru);
+  const ids = items
+    .filter((n) => n.type === "new_order" && n.status === "new")
+    .map((n) => n.id);
+  if (ids.length === 0) return;
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (service as any)
+    .from("notifications")
+    .update({ status: "acknowledged", acknowledged_at: new Date().toISOString() })
+    .in("id", ids);
+}
+
 export async function acknowledgeNotification(id: string): Promise<void> {
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { getMyOrderQueue, updateOrderItemStatus } from "@/app/actions/pos";
 import type { QueueOrder, QueueOrderItem } from "@/app/actions/pos";
+import { markMyOrdersSeen } from "@/app/actions/notifications";
 import { Clock, User } from "lucide-react";
 
 const POLL_MS = 8000;
@@ -147,6 +148,10 @@ export function OrdersQueue({
     try {
       const next = await getMyOrderQueue();
       if (activeRef.current) setOrders(next);
+      // Viewing the queue counts as seeing the new orders, so acknowledge the
+      // viewer's new-order alerts — this clears the Orders nav badge. Scoped to
+      // the viewer (server-side) by permission + table group + workstation.
+      await markMyOrdersSeen();
     } catch {
       // keep last known state on transient failure
     }
@@ -154,6 +159,8 @@ export function OrdersQueue({
 
   useEffect(() => {
     activeRef.current = true;
+    // Mark seen on mount so the badge clears as soon as the queue is opened.
+    refresh();
     const iv = setInterval(refresh, POLL_MS);
     const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
     document.addEventListener("visibilitychange", onVisible);
