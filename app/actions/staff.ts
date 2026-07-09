@@ -99,15 +99,33 @@ export async function updateStaffPermissions(
 
 export async function resetStaffPin(
   staffId: string,
-  authUserId: string,
+  authUserId: string | null,
   newPin: string
 ): Promise<ActionResult> {
   if (!PIN_REGEX.test(newPin)) return { error: "PIN must be exactly 4 digits (numbers only)." };
 
   const admin = createAdminClient();
+  const service = createServiceClient();
   const syntheticEmail = `emp-${staffId}@restrosewa.internal`;
 
-  // createUser accepts 4-digit PINs; updateUserById enforces a 6-char minimum — so recreate
+  // Preferred path: change the password on the existing auth account in place. No email
+  // collision, and there's never a moment where the staff member has no working login.
+  if (authUserId) {
+    const { error: updateErr } = await admin.auth.admin.updateUserById(authUserId, {
+      password: newPin,
+    });
+    if (!updateErr) return null;
+    // Some GoTrue versions reject short passwords on updateUserById (min-length check)
+    // even though createUser accepts a 4-digit PIN. Fall through to recreate the account.
+  }
+
+  // Fallback / no existing account. The synthetic email is unique, so any stale account
+  // holding it MUST be deleted before we can recreate — otherwise createUser fails with
+  // "A user with this email address has already been registered".
+  if (authUserId) {
+    await admin.auth.admin.deleteUser(authUserId);
+  }
+
   const { data: newAuthUser, error: createErr } = await admin.auth.admin.createUser({
     email: syntheticEmail,
     password: newPin,
@@ -115,19 +133,16 @@ export async function resetStaffPin(
   });
   if (createErr) return { error: `Failed to update PIN: ${createErr.message}` };
 
-  const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error: updateErr } = await (service as any)
+  const { error: linkErr } = await (service as any)
     .from("restaurant_users")
     .update({ auth_user_id: newAuthUser.user.id })
     .eq("id", staffId);
 
-  if (updateErr) {
+  if (linkErr) {
     await admin.auth.admin.deleteUser(newAuthUser.user.id);
     return { error: "Failed to update staff record." };
   }
-
-  await admin.auth.admin.deleteUser(authUserId);
   return null;
 }
 
@@ -263,24 +278,11 @@ export async function updateStaffMember(
 
   if (error) return { error: "Failed to update staff member." };
 
-  if (newPin && authUserId) {
-    const admin = createAdminClient();
-    const syntheticEmail = `emp-${staffId}@restrosewa.internal`;
-
-    const { data: newAuthUser, error: createErr } = await admin.auth.admin.createUser({
-      email: syntheticEmail,
-      password: newPin,
-      email_confirm: true,
-    });
-    if (createErr) return { error: `Staff details saved but PIN update failed: ${createErr.message}` };
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (service as any)
-      .from("restaurant_users")
-      .update({ auth_user_id: newAuthUser.user.id })
-      .eq("id", staffId);
-
-    await admin.auth.admin.deleteUser(authUserId);
+  if (newPin) {
+    const pinResult = await resetStaffPin(staffId, authUserId, newPin);
+    if (pinResult && "error" in pinResult) {
+      return { error: `Staff details saved but PIN update failed: ${pinResult.error}` };
+    }
   }
 
   revalidatePath(`/superadmin/restaurants/${restaurantId}`);

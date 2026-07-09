@@ -73,6 +73,61 @@ export async function createTableGroup(
   return null;
 }
 
+export async function deleteTableGroup(groupId: string): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!hasPermission(ru, PERMISSIONS.MANAGE_TABLES)) return { error: "Permission denied." };
+
+  const service = createServiceClient();
+
+  // Ownership check
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: group } = await (service as any)
+    .from("table_groups")
+    .select("id, name")
+    .eq("id", groupId)
+    .eq("restaurant_id", ru.restaurant_id)
+    .maybeSingle();
+  if (!group) return { error: "Table group not found." };
+
+  // Block deletion while tables still belong to the group. The FK is ON DELETE SET NULL,
+  // so deleting now would silently orphan those tables (staff would stop receiving their
+  // orders). Require the admin to reassign or remove them first.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { count: tableCount } = await (service as any)
+    .from("restaurant_tables")
+    .select("id", { count: "exact", head: true })
+    .eq("group_id", groupId);
+  if ((tableCount ?? 0) > 0) {
+    return {
+      error: `This group still has ${tableCount} table${tableCount === 1 ? "" : "s"}. Move ${tableCount === 1 ? "it" : "them"} to another group or delete ${tableCount === 1 ? "it" : "them"} first.`,
+    };
+  }
+
+  // Block deletion while staff are assigned to the group. The FK is ON DELETE CASCADE,
+  // so deleting now would silently drop those staff assignments.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { count: staffCount } = await (service as any)
+    .from("restaurant_user_table_groups")
+    .select("restaurant_user_id", { count: "exact", head: true })
+    .eq("table_group_id", groupId);
+  if ((staffCount ?? 0) > 0) {
+    return {
+      error: `This group is assigned to ${staffCount} staff member${staffCount === 1 ? "" : "s"}. Unassign ${staffCount === 1 ? "them" : "everyone"} from this group first.`,
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("table_groups")
+    .delete()
+    .eq("id", groupId)
+    .eq("restaurant_id", ru.restaurant_id);
+  if (error) return { error: error.message };
+
+  revalidatePath("/admin/tables");
+  return null;
+}
+
 export async function createTable(
   _prevState: ActionResult,
   formData: FormData

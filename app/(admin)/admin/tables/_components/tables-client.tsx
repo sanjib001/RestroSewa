@@ -7,6 +7,7 @@ import {
   updateTable,
   toggleTableStatus,
   deleteTable,
+  deleteTableGroup,
   regenerateTableQr,
   setTableGroupWaiters,
 } from "@/app/actions/tables-admin";
@@ -260,6 +261,57 @@ function TablePill({
   );
 }
 
+// ─── Delete Group Button ──────────────────────────────────────────────────────
+
+function DeleteGroupButton({
+  groupId,
+  groupName,
+  tableCount,
+  staffCount,
+}: {
+  groupId: string;
+  groupName: string;
+  tableCount: number;
+  staffCount: number;
+}) {
+  const [pending, startDelete] = useTransition();
+
+  // Surface the blocking reasons before hitting the server so the admin knows
+  // what to fix. The server re-validates and is the source of truth.
+  const blockers: string[] = [];
+  if (tableCount > 0) blockers.push(`${tableCount} table${tableCount === 1 ? "" : "s"}`);
+  if (staffCount > 0) blockers.push(`${staffCount} staff member${staffCount === 1 ? "" : "s"}`);
+
+  function handleClick() {
+    if (blockers.length > 0) {
+      alert(
+        `"${groupName}" can't be deleted yet — it still has ${blockers.join(" and ")} assigned to it.\n\n` +
+          `Reassign or remove them first, then try again.`
+      );
+      return;
+    }
+    if (!confirm(`Delete the table group "${groupName}"? This cannot be undone.`)) return;
+    startDelete(async () => {
+      const r = await deleteTableGroup(groupId);
+      if (r?.error) alert(r.error);
+    });
+  }
+
+  return (
+    <button
+      type="button"
+      title="Delete table group"
+      onClick={handleClick}
+      disabled={pending}
+      className="inline-flex items-center gap-1 text-xs"
+      style={{ color: blockers.length > 0 ? "var(--color-ink-mute)" : "#dc2626", opacity: pending ? 0.5 : 1 }}
+    >
+      <Trash2 size={12} />
+      {pending ? "Deleting…" : "Delete group"}
+    </button>
+  );
+}
+
 // ─── Group Waiter Bar ─────────────────────────────────────────────────────────
 
 function TableGroupWaiterBar({
@@ -467,6 +519,14 @@ export function TablesClient({
                 employees={employees}
                 assignedUserIds={assignedByTableGroup[g.id] ?? []}
               />
+              <span className="ml-auto">
+                <DeleteGroupButton
+                  groupId={g.id}
+                  groupName={g.name}
+                  tableCount={g.tables.length}
+                  staffCount={(assignedByTableGroup[g.id] ?? []).length}
+                />
+              </span>
             </div>
             <div className="flex flex-wrap gap-2 mb-3">
               {g.tables.map((t) => (

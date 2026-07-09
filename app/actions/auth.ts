@@ -121,7 +121,21 @@ export async function loginWithPin(
     return { error: "Incorrect PIN. Please try again." };
   }
 
+  // Route by role so restaurant admins land on their management dashboard, not the
+  // employee POS. Both admins and staff authenticate with the same synthetic-email + PIN.
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: ru } = await (service as any)
+    .from("restaurant_users")
+    .select("role")
+    .eq("id", restaurantUserId)
+    .eq("is_active", true)
+    .maybeSingle();
+
   revalidatePath("/", "layout");
+  if (ru?.role === "restaurant_admin") {
+    return { redirectTo: "/admin/dashboard" };
+  }
   return { redirectTo: "/employee/dashboard" };
 }
 
