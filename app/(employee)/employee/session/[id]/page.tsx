@@ -47,7 +47,7 @@ export default async function SessionPage({
       : "Session";
 
   return (
-    <div className="p-5 max-w-lg">
+    <div className="p-4 sm:p-5 max-w-lg mx-auto">
       <Link
         href="/employee/dashboard"
         className="inline-flex items-center gap-1 text-sm mb-4"

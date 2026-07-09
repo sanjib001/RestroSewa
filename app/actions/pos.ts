@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { hasPermission, PERMISSIONS, NAV_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { buildVisibilityFilter, getAssignedWorkstationIds } from "@/lib/assignments";
-import { emitNewOrderNotification } from "@/lib/notify";
+import { emitNewOrderNotification, emitOrderReadyNotification } from "@/lib/notify";
 
 export type ActionResult = { error: string } | null;
 
@@ -407,6 +407,53 @@ export async function updateOrderItemStatus(
     .from("session_order_items")
     .update({ item_status: status })
     .eq("id", itemId);
+
+  // Tell the customer their food is ready — but only once the *whole* order is
+  // ready (every item ready or served). A single item flipping in a multi-item
+  // order shouldn't fire the alert. Reuses the notification system, scoped to
+  // the session so only that guest is notified.
+  if (status === "ready") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: orderItems } = await (service as any)
+      .from("session_order_items")
+      .select("item_status")
+      .eq("order_id", item.order_id);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const all = (orderItems ?? []) as { item_status: string }[];
+    const fullyReady =
+      all.length > 0 &&
+      all.every((it) => it.item_status === "ready" || it.item_status === "served") &&
+      all.some((it) => it.item_status === "ready");
+
+    if (fullyReady) {
+      // Dedup: don't re-alert if this order already has an order_ready event.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: existing } = await (service as any)
+        .from("notifications")
+        .select("id")
+        .eq("order_id", item.order_id)
+        .eq("type", "order_ready")
+        .maybeSingle();
+
+      if (!existing) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: session } = await (service as any)
+          .from("sessions")
+          .select("table_id, room_id")
+          .eq("id", order.session_id)
+          .maybeSingle();
+        await emitOrderReadyNotification(service, {
+          restaurantId: ru.restaurant_id,
+          sessionId: order.session_id,
+          orderId: item.order_id,
+          tableId: session?.table_id ?? null,
+          roomId: session?.room_id ?? null,
+        });
+      }
+    }
+  }
+
   revalidatePath("/employee/queue");
   revalidatePath(`/employee/session/${order.session_id}`);
   return null;

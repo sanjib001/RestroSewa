@@ -123,10 +123,26 @@ export function EditRestaurantForm({
           Customer ordering enabled (via QR)
         </label>
 
-        <div className="flex gap-3">
-          {(["ordering_enabled", "view_only"] as const).map((mode) => (
+        <div className="flex flex-col gap-2">
+          {([
+            {
+              value: "ordering_enabled" as const,
+              label: "Menu + Ordering (With PIN)",
+              desc: "Customers place orders after entering a table PIN",
+            },
+            {
+              value: "ordering_no_pin" as const,
+              label: "Menu + Ordering (Without PIN)",
+              desc: "Customers place orders instantly — no PIN required",
+            },
+            {
+              value: "view_only" as const,
+              label: "View Menu Only",
+              desc: "Customers can only browse the menu",
+            },
+          ]).map(({ value, label, desc }) => (
             <label
-              key={mode}
+              key={value}
               className="flex items-center gap-2 cursor-pointer text-sm px-3 py-2 rounded-lg border flex-1"
               style={{
                 borderColor: "var(--color-hairline)",
@@ -137,19 +153,13 @@ export function EditRestaurantForm({
               <input
                 type="radio"
                 name="qr_mode"
-                value={mode}
-                defaultChecked={restaurant.qr_mode === mode || (!restaurant.qr_mode && mode === "ordering_enabled")}
+                value={value}
+                defaultChecked={restaurant.qr_mode === value || (!restaurant.qr_mode && value === "ordering_enabled")}
                 className="accent-indigo-500"
               />
               <span>
-                <span className="font-medium block text-xs">
-                  {mode === "ordering_enabled" ? "Ordering Enabled" : "View Menu Only"}
-                </span>
-                <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-                  {mode === "ordering_enabled"
-                    ? "Customers can browse and place orders"
-                    : "Customers can only browse the menu"}
-                </span>
+                <span className="font-medium block text-xs">{label}</span>
+                <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>{desc}</span>
               </span>
             </label>
           ))}

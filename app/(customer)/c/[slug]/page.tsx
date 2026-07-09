@@ -52,6 +52,9 @@ export default async function CustomerMenuPage({
 
   const orderingEnabled: boolean = restaurant.customer_ordering_enabled ?? true;
   const qrMode: string = restaurant.qr_mode ?? "ordering_enabled";
+  // In no-PIN ordering mode a session need not carry a customer PIN, so we pick up
+  // any active session for the table/room (staff-opened or customer-created).
+  const noPin = qrMode === "ordering_no_pin";
 
   // ── Table context ──
   let tableId: string | null = null;
@@ -72,14 +75,14 @@ export default async function CustomerMenuPage({
       tableId = table.id;
       tableNumber = table.number;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: activeSession } = await (service as any)
+      let tableSessionQ = (service as any)
         .from("sessions")
         .select("id")
         .eq("restaurant_id", restaurant.id)
         .eq("table_id", tableId)
-        .eq("status", "active")
-        .not("customer_pin", "is", null)
-        .maybeSingle();
+        .eq("status", "active");
+      if (!noPin) tableSessionQ = tableSessionQ.not("customer_pin", "is", null);
+      const { data: activeSession } = await tableSessionQ.maybeSingle();
       sessionId = activeSession?.id ?? null;
     }
   }
@@ -101,14 +104,14 @@ export default async function CustomerMenuPage({
       roomId = room.id;
       roomNumber = room.number;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: activeRoomSession } = await (service as any)
+      let roomSessionQ = (service as any)
         .from("sessions")
         .select("id")
         .eq("restaurant_id", restaurant.id)
         .eq("room_id", roomId)
-        .eq("status", "active")
-        .not("customer_pin", "is", null)
-        .maybeSingle();
+        .eq("status", "active");
+      if (!noPin) roomSessionQ = roomSessionQ.not("customer_pin", "is", null);
+      const { data: activeRoomSession } = await roomSessionQ.maybeSingle();
       sessionId = activeRoomSession?.id ?? null;
     }
   }

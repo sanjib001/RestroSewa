@@ -27,3 +27,28 @@ export async function emitNewOrderNotification(
     status: "new",
   });
 }
+
+// Raises a customer-facing "order ready" alert through the same notification
+// system. Scoped to the session so only the guest who placed the order sees it
+// (the customer page polls notifications for its own session). One per order —
+// the caller dedups. Staff-facing reads exclude `order_ready`.
+export async function emitOrderReadyNotification(
+  service: ServiceClient,
+  params: {
+    restaurantId: string;
+    sessionId: string;
+    orderId: string;
+    tableId: string | null;
+    roomId: string | null;
+  }
+): Promise<void> {
+  await service.from("notifications").insert({
+    restaurant_id: params.restaurantId,
+    table_id: params.tableId,
+    room_id: params.roomId,
+    session_id: params.sessionId,
+    order_id: params.orderId,
+    type: "order_ready",
+    status: "new",
+  });
+}

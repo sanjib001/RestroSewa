@@ -65,7 +65,7 @@ export default function NewRestaurantPage() {
   const [maxTables, setMaxTables] = useState(TIER_DEFAULTS.free.tables);
   const [maxRooms, setMaxRooms] = useState(TIER_DEFAULTS.free.rooms);
   const [orderingEnabled, setOrderingEnabled] = useState(true);
-  const [qrMode, setQrMode] = useState<"ordering_enabled" | "view_only">("ordering_enabled");
+  const [qrMode, setQrMode] = useState<"ordering_enabled" | "ordering_no_pin" | "view_only">("ordering_enabled");
 
   useEffect(() => {
     if (state && "redirectTo" in state) {
@@ -336,13 +336,18 @@ export default function NewRestaurantPage() {
           {/* Ordering mode */}
           <div style={{ opacity: orderingEnabled ? 1 : 0.4, pointerEvents: orderingEnabled ? "auto" : "none" }}>
             <FieldLabel>Ordering mode</FieldLabel>
-            <div className="flex gap-3 mt-2">
+            <div className="flex flex-col gap-2 mt-2">
               {(
                 [
                   {
                     value: "ordering_enabled" as const,
-                    label: "Menu + Ordering",
-                    desc: "Browse menu, place orders, call waiter",
+                    label: "Menu + Ordering (With PIN)",
+                    desc: "Browse menu, place orders after entering a table PIN",
+                  },
+                  {
+                    value: "ordering_no_pin" as const,
+                    label: "Menu + Ordering (Without PIN)",
+                    desc: "Browse menu, place orders instantly — no PIN required",
                   },
                   {
                     value: "view_only" as const,

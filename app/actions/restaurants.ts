@@ -108,7 +108,7 @@ export async function createRestaurant(
 
   const orderingEnabled = formData.get("customer_ordering_enabled") === "true";
   const qrMode = (formData.get("qr_mode") as string) || "ordering_enabled";
-  const validQrModes = ["ordering_enabled", "view_only"];
+  const validQrModes = ["ordering_enabled", "ordering_no_pin", "view_only"];
   if (!validQrModes.includes(qrMode)) return { error: "Invalid ordering mode." };
 
   const service = createServiceClient();
@@ -174,7 +174,7 @@ export async function updateRestaurant(
   const validTiers = ["free", "basic", "pro"];
   if (!validTiers.includes(tier)) return { error: "Invalid subscription tier." };
 
-  const validQrModes = ["ordering_enabled", "view_only"];
+  const validQrModes = ["ordering_enabled", "ordering_no_pin", "view_only"];
   if (!validQrModes.includes(qrMode)) return { error: "Invalid QR mode." };
 
   const maxTables = maxTablesRaw ? parseInt(maxTablesRaw, 10) : null;

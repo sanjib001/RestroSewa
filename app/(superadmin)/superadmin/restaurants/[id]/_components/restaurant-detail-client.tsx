@@ -156,7 +156,9 @@ export function RestaurantDetailClient({ restaurant }: { restaurant: RestaurantD
               ? "Disabled"
               : restaurant.qr_mode === "view_only"
               ? "View Menu Only"
-              : "Ordering Enabled"}
+              : restaurant.qr_mode === "ordering_no_pin"
+              ? "Ordering Enabled (No PIN)"
+              : "Ordering Enabled (With PIN)"}
           </p>
         </div>
       </div>

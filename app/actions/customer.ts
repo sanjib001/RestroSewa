@@ -4,6 +4,31 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 import { emitNewOrderNotification } from "@/lib/notify";
 
+export type CustomerOrderItem = {
+  id: string;
+  name: string;
+  quantity: number;
+  price: number;
+  status: "pending" | "ready" | "served";
+};
+
+export type CustomerOrderStatus = "pending" | "ready" | "served";
+
+export type CustomerOrder = {
+  id: string;
+  created_at: string;
+  status: CustomerOrderStatus;
+  total: number;
+  items: CustomerOrderItem[];
+};
+
+export type CustomerOrderFeed = {
+  orders: CustomerOrder[];
+  // order_ready notifications (status "new") for this session — used to fire a
+  // one-time "your order is ready" toast, then acknowledged by the client.
+  ready: { id: string; order_id: string | null }[];
+};
+
 export type CustomerCartItem = {
   menu_item_id: string;
   item_name: string;
@@ -55,6 +80,68 @@ export async function verifyCustomerPin(
 
   const success = fresh.customer_pin === pin;
   return { success, resolvedSessionId: success ? (fresh.id as string) : null };
+}
+
+// Finds (or lazily creates) the active session a no-PIN ordering customer should
+// attach their order to. Only permitted for restaurants configured with
+// qr_mode = "ordering_no_pin" — this is the server-side guard that keeps PIN-mode
+// restaurants from having sessions auto-created around their PIN gate. Returns an
+// existing active session for the table/room when one is present (so staff- and
+// customer-side orders converge), otherwise opens a fresh PIN-less session.
+export async function ensureCustomerSession(
+  restaurantId: string,
+  tableId: string | null,
+  roomId: string | null
+): Promise<{ sessionId: string | null; error?: string }> {
+  const service = createServiceClient();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: restaurant } = await (service as any)
+    .from("restaurants")
+    .select("qr_mode, customer_ordering_enabled, is_active")
+    .eq("id", restaurantId)
+    .maybeSingle();
+
+  if (
+    !restaurant ||
+    restaurant.is_active === false ||
+    restaurant.customer_ordering_enabled === false ||
+    restaurant.qr_mode !== "ordering_no_pin"
+  ) {
+    return { sessionId: null, error: "Ordering is not available." };
+  }
+
+  if (!tableId && !roomId) return { sessionId: null, error: "No table or room context." };
+
+  // Reuse an existing active session for this table/room if one exists.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let q = (service as any)
+    .from("sessions")
+    .select("id")
+    .eq("restaurant_id", restaurantId)
+    .eq("status", "active");
+  if (tableId) q = q.eq("table_id", tableId);
+  else q = q.eq("room_id", roomId);
+
+  const { data: existing } = await q.maybeSingle();
+  if (existing) return { sessionId: existing.id as string };
+
+  // No active session yet — open one without a PIN.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: created, error } = await (service as any)
+    .from("sessions")
+    .insert({
+      restaurant_id: restaurantId,
+      type: tableId ? "table" : "room_service",
+      table_id: tableId ?? null,
+      room_id: roomId ?? null,
+      customer_pin: null,
+    })
+    .select("id")
+    .single();
+
+  if (error) return { sessionId: null, error: "Could not start ordering session." };
+  return { sessionId: created.id as string };
 }
 
 export async function checkSessionActive(
@@ -224,4 +311,80 @@ export async function sendNotification(
   if (error) return { error: error.message };
   revalidatePath("/employee/notifications");
   return {};
+}
+
+// Live feed for the customer page: the session's own orders (with per-item
+// status) plus any unseen "order ready" alerts. Scoped strictly to the session,
+// so a guest only ever sees their own order — never another table's. Polled by
+// the customer page; no realtime infra required.
+export async function getCustomerOrderFeed(
+  sessionId: string | null
+): Promise<CustomerOrderFeed> {
+  if (!sessionId) return { orders: [], ready: [] };
+
+  const service = createServiceClient();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: orderRows } = await (service as any)
+    .from("session_orders")
+    .select("id, created_at, session_order_items ( id, item_name, quantity, item_price, item_status )")
+    .eq("session_id", sessionId)
+    .order("created_at", { ascending: false });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const orders: CustomerOrder[] = ((orderRows ?? []) as any[]).map((o) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const items: CustomerOrderItem[] = ((o.session_order_items ?? []) as any[]).map((it) => ({
+      id: it.id,
+      name: it.item_name,
+      quantity: it.quantity,
+      price: Number(it.item_price ?? 0),
+      status: it.item_status,
+    }));
+
+    // Order-level status derived from its items:
+    //   all served → served · all ready/served → ready · otherwise pending.
+    let status: CustomerOrderStatus = "pending";
+    if (items.length > 0) {
+      if (items.every((i) => i.status === "served")) status = "served";
+      else if (items.every((i) => i.status === "ready" || i.status === "served")) status = "ready";
+    }
+
+    const total = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+    return { id: o.id, created_at: o.created_at, status, total, items };
+  })
+  // Only surface orders that still have items (defensive).
+  .filter((o) => o.items.length > 0);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: readyRows } = await (service as any)
+    .from("notifications")
+    .select("id, order_id")
+    .eq("session_id", sessionId)
+    .eq("type", "order_ready")
+    .eq("status", "new");
+
+  const ready = ((readyRows ?? []) as { id: string; order_id: string | null }[]).map((r) => ({
+    id: r.id,
+    order_id: r.order_id,
+  }));
+
+  return { orders, ready };
+}
+
+// Acknowledges "order ready" alerts once the customer has been shown the toast,
+// so the same alert doesn't fire again on the next poll. Session-scoped.
+export async function acknowledgeCustomerReady(
+  sessionId: string,
+  ids: string[]
+): Promise<void> {
+  if (!sessionId || ids.length === 0) return;
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (service as any)
+    .from("notifications")
+    .update({ status: "acknowledged", acknowledged_at: new Date().toISOString() })
+    .eq("session_id", sessionId)
+    .eq("type", "order_ready")
+    .in("id", ids);
 }

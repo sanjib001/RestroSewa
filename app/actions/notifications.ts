@@ -39,6 +39,12 @@ export async function getActiveNotifications(
 
   if (!data) return [];
 
+  // `order_ready` is a customer-facing alert (polled by the customer page for
+  // its own session). Staff never see it in their list or badge.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const staffData = (data as any[]).filter((n) => n.type !== "order_ready");
+  if (staffData.length === 0) return [];
+
   const visibility = await buildVisibilityFilter(restaurantId, viewer);
   const myWorkstations = await getAssignedWorkstationIds(viewer.id);
   const isWorkstationStaff = !visibility.seesAll && myWorkstations.size > 0;
@@ -54,7 +60,7 @@ export async function getActiveNotifications(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const orderIds = [
       ...new Set(
-        (data as any[])
+        staffData
           .filter((n) => n.type === "new_order" && n.order_id)
           .map((n) => n.order_id as string)
       ),
@@ -74,7 +80,7 @@ export async function getActiveNotifications(
       }
     }
 
-    rows = (data as any[]).filter((n) => {
+    rows = staffData.filter((n) => {
       if (n.type !== "new_order" || !n.order_id) return false;
       const ws = orderWorkstations.get(n.order_id);
       if (!ws) return false;
@@ -83,7 +89,7 @@ export async function getActiveNotifications(
     });
   } else {
     // Non-workstation staff: existing table-group routing.
-    rows = (data as any[]).filter(
+    rows = staffData.filter(
       (n) =>
         visibility.seesAll ||
         (visibility.canSeeTable(n.table_id) && visibility.canSeeRoom(n.room_id))

@@ -19,7 +19,7 @@ export default async function OrdersPage() {
   const ready = orders.filter((o) => o.status === "ready").length;
 
   return (
-    <div className="p-5 max-w-2xl">
+    <div className="p-4 sm:p-5 max-w-2xl mx-auto">
       <h1
         className="text-xl mb-1"
         style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}

@@ -187,7 +187,7 @@ export function SalesView({ initial }: { initial: SalesReport }) {
   ].filter((b) => b.value > 0);
 
   return (
-    <div className="p-5 max-w-2xl">
+    <div className="p-4 sm:p-5 max-w-2xl mx-auto">
       <div className="flex items-baseline justify-between gap-3 mb-1">
         <h1 className="text-xl" style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}>
           Sales

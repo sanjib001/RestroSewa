@@ -109,7 +109,7 @@ export default async function NotificationsPage() {
   const ackNotifs = notifications.filter((n) => n.status === "acknowledged");
 
   return (
-    <div className="p-5 max-w-lg">
+    <div className="p-4 sm:p-5 max-w-lg mx-auto">
       <h1
         className="text-xl mb-1"
         style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}
