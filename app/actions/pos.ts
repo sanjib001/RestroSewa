@@ -760,25 +760,92 @@ export type SalesTxn = {
   customer_name: string | null;
 };
 
-export type SalesSummary = {
-  total: number;
-  today: number;
-  week: number;
-  month: number;
+// The period a viewer can filter the Sales screen by. "all" = all-time,
+// "custom" = an explicit [from, to] date range.
+export type SalesPeriod = "today" | "week" | "month" | "year" | "all" | "custom";
+
+// Sales figures for whichever period is selected, plus an always-computed
+// overview so the period cards can show their own totals at a glance.
+export type SalesReport = {
+  period: SalesPeriod;
+  from: string | null;
+  to: string | null;
+  overview: { today: number; week: number; month: number; year: number; total: number };
+  periodTotal: number;
   orderCount: number;
   avgOrderValue: number;
   breakdown: { cash: number; online: number; card: number; other: number };
   transactions: SalesTxn[];
 };
 
-export async function getSalesSummary(restaurantId: string): Promise<SalesSummary> {
+// Resolves a period (or custom range) to millisecond [from, to] bounds. The
+// today/week/month/year bounds match how the overview totals are computed so a
+// selected card's total always equals its period detail.
+function resolveSalesRange(
+  period: SalesPeriod,
+  from?: string | null,
+  to?: string | null
+): { fromMs: number; toMs: number } {
+  const now = new Date();
+  const nowMs = now.getTime();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const startOfYear = new Date(now.getFullYear(), 0, 1).getTime();
+  const weekAgo = nowMs - 7 * 24 * 60 * 60 * 1000;
+
+  switch (period) {
+    case "today":
+      return { fromMs: startOfToday, toMs: Infinity };
+    case "week":
+      return { fromMs: weekAgo, toMs: Infinity };
+    case "month":
+      return { fromMs: startOfMonth, toMs: Infinity };
+    case "year":
+      return { fromMs: startOfYear, toMs: Infinity };
+    case "custom": {
+      const f = from ? new Date(from).getTime() : -Infinity;
+      // `to` is a calendar day — include the whole day by pushing to its end.
+      const t = to ? new Date(to).getTime() + 24 * 60 * 60 * 1000 - 1 : Infinity;
+      return { fromMs: Number.isNaN(f) ? -Infinity : f, toMs: Number.isNaN(t) ? Infinity : t };
+    }
+    case "all":
+    default:
+      return { fromMs: -Infinity, toMs: Infinity };
+  }
+}
+
+// Self-authing sales report. Derives the restaurant from the session (never
+// trusts client input) and enforces the same sales permission as the page, so
+// the client can safely re-query it on every filter change. Everything is
+// derived from the existing `payments` rows — no records are created.
+export async function getSalesReport(params?: {
+  period?: SalesPeriod;
+  from?: string | null;
+  to?: string | null;
+}): Promise<SalesReport> {
+  const ru = await getRestaurantUser();
+  if (!NAV_ACCESS.canSeeSales(ru)) {
+    return {
+      period: params?.period ?? "today",
+      from: params?.from ?? null,
+      to: params?.to ?? null,
+      overview: { today: 0, week: 0, month: 0, year: 0, total: 0 },
+      periodTotal: 0,
+      orderCount: 0,
+      avgOrderValue: 0,
+      breakdown: { cash: 0, online: 0, card: 0, other: 0 },
+      transactions: [],
+    };
+  }
+
+  const period = params?.period ?? "today";
   const service = createServiceClient();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (service as any)
     .from("payments")
     .select("id, amount, total_amount, cash_amount, online_amount, payment_method, created_at, sessions ( type, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) )")
-    .eq("restaurant_id", restaurantId)
+    .eq("restaurant_id", ru.restaurant_id)
     .order("created_at", { ascending: false });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -788,33 +855,47 @@ export async function getSalesSummary(restaurantId: string): Promise<SalesSummar
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const weekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const startOfYear = new Date(now.getFullYear(), 0, 1).getTime();
 
-  let total = 0, today = 0, week = 0, month = 0;
+  const { fromMs, toMs } = resolveSalesRange(period, params?.from, params?.to);
+
+  const overview = { today: 0, week: 0, month: 0, year: 0, total: 0 };
   const breakdown = { cash: 0, online: 0, card: 0, other: 0 };
+  let periodTotal = 0;
+  let orderCount = 0;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const inRange: any[] = [];
 
   for (const p of rows) {
     const value = Number(p.total_amount ?? p.amount ?? 0);
-    const cash = Number(p.cash_amount ?? 0);
-    const online = Number(p.online_amount ?? 0);
     const ts = new Date(p.created_at).getTime();
 
-    total += value;
-    if (ts >= startOfToday) today += value;
-    if (ts >= weekAgo) week += value;
-    if (ts >= startOfMonth) month += value;
+    // Overview totals — always over all rows, independent of the filter.
+    overview.total += value;
+    if (ts >= startOfToday) overview.today += value;
+    if (ts >= weekAgo) overview.week += value;
+    if (ts >= startOfMonth) overview.month += value;
+    if (ts >= startOfYear) overview.year += value;
 
-    // cash/online/mixed rows carry the split in cash_amount/online_amount.
-    // card/upi/other legacy rows carry the whole value under amount.
-    breakdown.cash += cash;
-    breakdown.online += online;
-    if (p.payment_method === "card") breakdown.card += value;
-    else if (p.payment_method === "upi" || p.payment_method === "other") breakdown.other += value;
+    // Selected-period aggregation.
+    if (ts >= fromMs && ts <= toMs) {
+      const cash = Number(p.cash_amount ?? 0);
+      const online = Number(p.online_amount ?? 0);
+      periodTotal += value;
+      orderCount += 1;
+      // cash/online/mixed rows carry the split in cash_amount/online_amount.
+      // card/upi/other legacy rows carry the whole value under amount.
+      breakdown.cash += cash;
+      breakdown.online += online;
+      if (p.payment_method === "card") breakdown.card += value;
+      else if (p.payment_method === "upi" || p.payment_method === "other") breakdown.other += value;
+      inRange.push(p);
+    }
   }
 
-  const orderCount = rows.length;
-  const avgOrderValue = orderCount > 0 ? total / orderCount : 0;
+  const avgOrderValue = orderCount > 0 ? periodTotal / orderCount : 0;
 
-  const transactions: SalesTxn[] = rows.slice(0, 25).map((p) => ({
+  const transactions: SalesTxn[] = inRange.slice(0, 200).map((p) => ({
     id: p.id,
     amount: Number(p.total_amount ?? p.amount ?? 0),
     method: p.payment_method,
@@ -827,5 +908,15 @@ export async function getSalesSummary(restaurantId: string): Promise<SalesSummar
     customer_name: p.sessions?.credit_customers?.name ?? null,
   }));
 
-  return { total, today, week, month, orderCount, avgOrderValue, breakdown, transactions };
+  return {
+    period,
+    from: params?.from ?? null,
+    to: params?.to ?? null,
+    overview,
+    periodTotal,
+    orderCount,
+    avgOrderValue,
+    breakdown,
+    transactions,
+  };
 }
