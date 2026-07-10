@@ -303,7 +303,9 @@ export function SessionClient({
   canForceClose?: boolean;
   canSeePIN?: boolean;
 }) {
-  const [, startForceClose] = useTransition();
+  const [forceClosing, startForceClose] = useTransition();
+  const [forceError, setForceError] = useState<string | null>(null);
+  const hasOrders = session.items.length > 0;
   const pendingItems = session.items.filter((i) => i.item_status !== "served");
   const servedItems  = session.items.filter((i) => i.item_status === "served");
   const isClosed     = session.status === "closed";
@@ -401,26 +403,46 @@ export function SessionClient({
             </p>
           )}
 
-          {canForceClose && (
-            <button
-              type="button"
-              className="w-full rounded-xl border py-3 text-sm font-medium transition-colors"
-              style={{ borderColor: "#ef444444", color: "#dc2626", background: "#fff0f0" }}
-              onClick={() => {
-                if (
-                  confirm(
-                    "Force close this session? Pending notifications will be cleared and the table/room will become available immediately."
-                  )
-                ) {
-                  startForceClose(async () => {
-                    await forceCloseSession(session.id);
-                  });
-                }
-              }}
+          {/* Force close / deactivate.
+              · Cashier/manager (canForceClose): may close any session.
+              · Any assigned staff: may deactivate an EMPTY table (opened by
+                mistake). A table with orders is blocked with a clear message. */}
+          {hasOrders && !canForceClose ? (
+            <div
+              className="rounded-xl border px-4 py-3 text-sm"
+              style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas-soft)", color: "var(--color-ink-mute)" }}
             >
-              Force close session
-            </button>
-          )}
+              This table contains active orders and can only be closed by the Cashier.
+            </div>
+          ) : (canForceClose || !hasOrders) ? (
+            <>
+              <button
+                type="button"
+                disabled={forceClosing}
+                className="w-full rounded-xl border py-3 text-sm font-medium transition-colors disabled:opacity-60"
+                style={{ borderColor: "#ef444444", color: "#dc2626", background: "#fff0f0" }}
+                onClick={() => {
+                  const msg = !hasOrders
+                    ? "Deactivate this table? It has no orders and will return to Available immediately."
+                    : "Force close this session? Pending notifications will be cleared and the table/room will become available immediately.";
+                  if (confirm(msg)) {
+                    setForceError(null);
+                    startForceClose(async () => {
+                      const res = await forceCloseSession(session.id);
+                      if (res?.error) setForceError(res.error);
+                    });
+                  }
+                }}
+              >
+                {forceClosing ? "Closing…" : !hasOrders ? "Deactivate table" : "Force close session"}
+              </button>
+              {forceError && (
+                <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
+                  {forceError}
+                </p>
+              )}
+            </>
+          ) : null}
         </>
       )}
 

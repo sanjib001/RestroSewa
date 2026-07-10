@@ -705,15 +705,34 @@ export async function clearSessionPin(sessionId: string): Promise<ActionResult> 
 
 // ─── Force Close Session ─────────────────────────────────────────────────────
 
+// Whether a session has any placed order items (used to decide who may close it).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function sessionHasOrders(service: any, sessionId: string): Promise<boolean> {
+  const { data: orders } = await service
+    .from("session_orders")
+    .select("id")
+    .eq("session_id", sessionId);
+  const orderIds = ((orders ?? []) as { id: string }[]).map((o) => o.id);
+  if (orderIds.length === 0) return false;
+
+  const { data: items } = await service
+    .from("session_order_items")
+    .select("id")
+    .in("order_id", orderIds)
+    .limit(1);
+  return ((items ?? []) as unknown[]).length > 0;
+}
+
+// Force close (deactivate) a table/room session without taking payment.
+//
+// Access rules:
+//  - Cashiers / managers (CLOSE_BILLS or MANAGE_TABLES) may force close ANY of
+//    their sessions, orders or not — existing behavior, unchanged.
+//  - Any assigned staff member (table-group / room visibility) may force close a
+//    session ONLY while it has no orders — e.g. a table opened by mistake. Once
+//    an order exists, closing is reserved for the Cashier.
 export async function forceCloseSession(sessionId: string): Promise<ActionResult> {
   const ru = await getRestaurantUser();
-  if (
-    !hasPermission(ru, PERMISSIONS.CLOSE_BILLS) &&
-    !hasPermission(ru, PERMISSIONS.MANAGE_TABLES)
-  ) {
-    return { error: "Permission denied." };
-  }
-
   const service = createServiceClient();
 
   // Verify ownership and get table/room context
@@ -726,6 +745,25 @@ export async function forceCloseSession(sessionId: string): Promise<ActionResult
 
   if (!session || session.restaurant_id !== ru.restaurant_id)
     return { error: "Permission denied." };
+
+  const privileged =
+    hasPermission(ru, PERMISSIONS.CLOSE_BILLS) ||
+    hasPermission(ru, PERMISSIONS.MANAGE_TABLES);
+
+  // Table-group isolation: non-privileged staff may only act on tables/rooms they
+  // are assigned to (admins / managers see all).
+  const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
+  const isAssigned =
+    visibility.seesAll ||
+    (visibility.canSeeTable(session.table_id) && visibility.canSeeRoom(session.room_id));
+
+  if (!privileged && !isAssigned) return { error: "Permission denied." };
+
+  // Non-privileged staff may only deactivate an empty (accidentally opened)
+  // session — a table with orders is the Cashier's to close.
+  if (!privileged && (await sessionHasOrders(service, sessionId))) {
+    return { error: "This table contains active orders and can only be closed by the Cashier." };
+  }
 
   // Clear pending notifications for this table or room
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
