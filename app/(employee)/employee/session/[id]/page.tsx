@@ -4,8 +4,22 @@ import { getSessionDetail } from "@/app/actions/pos";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 import { buildVisibilityFilter } from "@/lib/assignments";
+import { createServiceClient } from "@/lib/supabase/service";
 import { SessionClient } from "./_components/session-client";
+import type { RestaurantInfo } from "./_components/print-tickets";
 import { ChevronLeft } from "lucide-react";
+
+// Reads optional percentage charges from the restaurant `settings` JSON. Returns
+// undefined when absent/invalid so the bill simply omits the line.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function numFromSettings(settings: any, ...keys: string[]): number | undefined {
+  if (!settings || typeof settings !== "object") return undefined;
+  for (const k of keys) {
+    const v = Number(settings[k]);
+    if (!Number.isNaN(v) && v > 0) return v;
+  }
+  return undefined;
+}
 
 export default async function SessionPage({
   params,
@@ -36,6 +50,24 @@ export default async function SessionPage({
 
   // Everyone who can view the session can also see its ordering PIN.
   const canSeePIN = canView;
+
+  // Restaurant header details for the KOT / Bill tickets.
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: rest } = await (service as any)
+    .from("restaurants")
+    .select("name, address, contact_phone, pan_vat_number, settings")
+    .eq("id", restaurantUser.restaurant_id)
+    .maybeSingle();
+
+  const restaurant: RestaurantInfo = {
+    name: rest?.name ?? "Restaurant",
+    address: rest?.address ?? null,
+    contact_phone: rest?.contact_phone ?? null,
+    pan_vat_number: rest?.pan_vat_number ?? null,
+    tax_percent: numFromSettings(rest?.settings, "tax_percent", "tax_rate", "gst_percent"),
+    service_charge_percent: numFromSettings(rest?.settings, "service_charge_percent", "service_charge"),
+  };
 
   const label =
     session.type === "table" && session.table_number
@@ -78,6 +110,8 @@ export default async function SessionPage({
 
       <SessionClient
         session={session}
+        restaurant={restaurant}
+        staffName={restaurantUser.display_name}
         canCreateOrders={canCreateOrders}
         canCloseBills={canCloseBills}
         canForceClose={canForceClose}

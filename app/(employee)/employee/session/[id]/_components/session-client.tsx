@@ -7,6 +7,8 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Check, ChevronRight, Plus } from "lucide-react";
+import { SessionPrintButtons } from "./print-tickets";
+import type { RestaurantInfo } from "./print-tickets";
 
 const STATUS_LABEL: Record<string, string> = {
   pending: "Pending",
@@ -292,12 +294,16 @@ function PaymentForm({ session }: { session: SessionDetail }) {
 
 export function SessionClient({
   session,
+  restaurant,
+  staffName = "",
   canCreateOrders = false,
   canCloseBills = false,
   canForceClose = false,
   canSeePIN = true,
 }: {
   session: SessionDetail;
+  restaurant: RestaurantInfo;
+  staffName?: string;
   canCreateOrders?: boolean;
   canCloseBills?: boolean;
   canForceClose?: boolean;
@@ -393,6 +399,18 @@ export function SessionClient({
                 Add items
               </Button>
             </Link>
+          )}
+
+          {/* KOT / Bill printing — for staff with order/billing permissions,
+              once the table has at least one order. */}
+          {hasOrders && (
+            <SessionPrintButtons
+              session={session}
+              restaurant={restaurant}
+              staffName={staffName}
+              canPrintKot={canCreateOrders}
+              canPrintBill={canCloseBills}
+            />
           )}
 
           {canCloseBills && <PaymentForm session={session} />}

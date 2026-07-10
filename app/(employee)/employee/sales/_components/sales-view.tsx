@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { getSalesReport } from "@/app/actions/pos";
+import { getSalesReport, exportSalesCsv } from "@/app/actions/pos";
 import type { SalesPeriod, SalesReport, SalesTxn } from "@/app/actions/pos";
+import { PaidBillButton } from "./paid-bill";
 
 function money(n: number) {
   return `₹${Math.round(n).toLocaleString("en-IN")}`;
@@ -139,6 +140,8 @@ function TxnCard({ txn }: { txn: SalesTxn }) {
         <p className="text-sm font-medium tabular-nums" style={{ color: "var(--color-ink)" }}>{money(txn.amount)}</p>
         <p className="text-[10px] uppercase tracking-wide" style={{ color: "#1a7a4a", letterSpacing: "0.06em" }}>Paid</p>
       </div>
+      {/* Reprint the paid bill on demand — reuses the payment record. */}
+      <PaidBillButton paymentId={txn.id} />
     </div>
   );
 }
@@ -149,6 +152,7 @@ export function SalesView({ initial }: { initial: SalesReport }) {
   const [customFrom, setCustomFrom] = useState<string>(initial.from ?? "");
   const [customTo, setCustomTo] = useState<string>(initial.to ?? "");
   const [loading, startTransition] = useTransition();
+  const [exporting, setExporting] = useState(false);
   const activeRef = useRef(true);
 
   useEffect(() => {
@@ -177,6 +181,36 @@ export function SalesView({ initial }: { initial: SalesReport }) {
     load("custom", customFrom || undefined, customTo || undefined);
   }, [customFrom, customTo, load]);
 
+  // Export the CURRENT filter (period or custom range) as CSV — the server
+  // re-runs the same query (uncapped) so the file matches what's on screen.
+  const exportCsv = useCallback(async () => {
+    setExporting(true);
+    try {
+      const res = await exportSalesCsv({
+        period,
+        from: customFrom || null,
+        to: customTo || null,
+      });
+      if ("error" in res) {
+        alert(res.error);
+        return;
+      }
+      const blob = new Blob([res.csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = res.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Could not export sales. Please try again.");
+    } finally {
+      setExporting(false);
+    }
+  }, [period, customFrom, customTo]);
+
   const groups = useMemo(() => groupByDate(report.transactions), [report.transactions]);
 
   const breakdownItems = [
@@ -188,11 +222,22 @@ export function SalesView({ initial }: { initial: SalesReport }) {
 
   return (
     <div className="p-4 sm:p-5 max-w-2xl mx-auto">
-      <div className="flex items-baseline justify-between gap-3 mb-1">
-        <h1 className="text-xl" style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}>
-          Sales
-        </h1>
-        {loading && <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Updating…</span>}
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <div className="flex items-baseline gap-3">
+          <h1 className="text-xl" style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}>
+            Sales
+          </h1>
+          {loading && <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Updating…</span>}
+        </div>
+        <button
+          type="button"
+          onClick={exportCsv}
+          disabled={exporting}
+          className="text-sm px-3 py-1.5 rounded-lg font-medium border transition-colors disabled:opacity-50"
+          style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)", color: "var(--color-ink)" }}
+        >
+          {exporting ? "Exporting…" : "Export CSV"}
+        </button>
       </div>
       <p className="text-sm mb-5" style={{ color: "var(--color-ink-mute)" }}>
         Showing <span style={{ color: "var(--color-ink)" }}>{PERIOD_LABEL[report.period]}</span>

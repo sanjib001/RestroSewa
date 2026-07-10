@@ -1137,3 +1137,235 @@ export async function getSalesReport(params?: {
     transactions,
   };
 }
+
+// ─── Sales CSV Export ─────────────────────────────────────────────────────────
+// Exports the sales transactions for the SAME filter the Sales screen is showing
+// (period or custom range). Reuses `resolveSalesRange` + the `payments` table, so
+// numbers match the dashboard exactly. Unlike the on-screen list this is not
+// capped at 200 rows. Self-authing + sales-permission gated.
+
+const SALES_METHOD_LABEL: Record<string, string> = {
+  cash: "Cash",
+  online: "Online",
+  mixed: "Cash + Online",
+  card: "Card",
+  upi: "UPI",
+  other: "Other",
+};
+
+function csvCell(v: unknown): string {
+  const s = v == null ? "" : String(v);
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+export async function exportSalesCsv(params?: {
+  period?: SalesPeriod;
+  from?: string | null;
+  to?: string | null;
+}): Promise<{ filename: string; csv: string } | { error: string }> {
+  const ru = await getRestaurantUser();
+  if (!NAV_ACCESS.canSeeSales(ru)) {
+    return { error: "You don't have permission to export sales." };
+  }
+
+  const period = params?.period ?? "today";
+  const service = createServiceClient();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("payments")
+    .select(
+      "id, amount, total_amount, payment_method, created_at, created_by, sessions ( type, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) )"
+    )
+    .eq("restaurant_id", ru.restaurant_id)
+    .order("created_at", { ascending: false });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = (data ?? []) as any[];
+  const { fromMs, toMs } = resolveSalesRange(period, params?.from, params?.to);
+  const inRange = rows.filter((p) => {
+    const ts = new Date(p.created_at).getTime();
+    return ts >= fromMs && ts <= toMs;
+  });
+
+  // Resolve cashier (created_by) → display name in one lookup.
+  const cashierIds = [...new Set(inRange.map((p) => p.created_by).filter(Boolean))] as string[];
+  const cashierNames = new Map<string, string>();
+  if (cashierIds.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: users } = await (service as any)
+      .from("restaurant_users")
+      .select("id, display_name")
+      .in("id", cashierIds);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const u of (users ?? []) as any[]) cashierNames.set(u.id, u.display_name);
+  }
+
+  const header = [
+    "Date & Time",
+    "Bill/Order ID",
+    "Table Number",
+    "Customer",
+    "Payment Method",
+    "Payment Status",
+    "Total Amount",
+    "Cashier",
+    "Transaction Status",
+  ];
+  const lines = [header.map(csvCell).join(",")];
+
+  for (const p of inRange) {
+    const dt = new Date(p.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+    const table = p.sessions?.restaurant_tables?.number
+      ? `Table ${p.sessions.restaurant_tables.number}`
+      : p.sessions?.rooms?.number
+      ? `Room ${p.sessions.rooms.number}`
+      : p.sessions?.type === "walk_in"
+      ? "Walk-in"
+      : "";
+    const customer = p.sessions?.credit_customers?.name ?? "";
+    const method = SALES_METHOD_LABEL[p.payment_method] ?? p.payment_method ?? "";
+    const total = Number(p.total_amount ?? p.amount ?? 0).toFixed(2);
+    const cashier = cashierNames.get(p.created_by) ?? "";
+    // A `payments` row always represents a completed, paid transaction.
+    lines.push([dt, p.id, table, customer, method, "Paid", total, cashier, "Completed"].map(csvCell).join(","));
+  }
+
+  // Leading BOM so Excel opens UTF-8 correctly; CRLF line endings for Windows.
+  const csv = "﻿" + lines.join("\r\n");
+  const stamp = new Date().toISOString().slice(0, 10);
+  return { filename: `sales_${period}_${stamp}.csv`, csv };
+}
+
+// ─── Reprint a Paid Bill ──────────────────────────────────────────────────────
+// Reassembles a completed transaction's receipt from the existing `payments`
+// row + its session's orders/items — no new bill or record is created. Used by
+// the Sales dashboard to reprint a bill after payment. Sales-permission gated.
+
+export type PaidBillItem = { id: string; item_name: string; item_price: number; quantity: number };
+
+export type PaidBill = {
+  payment_id: string;
+  created_at: string;
+  method: string;
+  cash_amount: number;
+  online_amount: number;
+  total: number;
+  cashier_name: string | null;
+  order_ids: string[];
+  location: string;
+  restaurant: {
+    name: string;
+    address: string | null;
+    contact_phone: string | null;
+    pan_vat_number: string | null;
+    tax_percent?: number;
+    service_charge_percent?: number;
+  };
+  items: PaidBillItem[];
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function settingsNumber(settings: any, ...keys: string[]): number | undefined {
+  if (!settings || typeof settings !== "object") return undefined;
+  for (const k of keys) {
+    const v = Number(settings[k]);
+    if (!Number.isNaN(v) && v > 0) return v;
+  }
+  return undefined;
+}
+
+export async function getPaidBill(paymentId: string): Promise<PaidBill | { error: string }> {
+  const ru = await getRestaurantUser();
+  if (!NAV_ACCESS.canSeeSales(ru)) {
+    return { error: "You don't have permission to view bills." };
+  }
+
+  const service = createServiceClient();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: p } = await (service as any)
+    .from("payments")
+    .select(
+      "id, amount, total_amount, cash_amount, online_amount, payment_method, created_at, created_by, session_id, restaurant_id, sessions ( type, restaurant_tables ( number ), rooms ( number ) )"
+    )
+    .eq("id", paymentId)
+    .maybeSingle();
+
+  if (!p || p.restaurant_id !== ru.restaurant_id) return { error: "Bill not found." };
+
+  // Items via the session's orders (the same records the bill was totalled from).
+  let items: PaidBillItem[] = [];
+  let order_ids: string[] = [];
+  if (p.session_id) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: orders } = await (service as any)
+      .from("session_orders")
+      .select("id")
+      .eq("session_id", p.session_id);
+    order_ids = ((orders ?? []) as { id: string }[]).map((o) => o.id);
+    if (order_ids.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: its } = await (service as any)
+        .from("session_order_items")
+        .select("id, item_name, item_price, quantity, created_at")
+        .in("order_id", order_ids)
+        .order("created_at");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      items = ((its ?? []) as any[]).map((it) => ({
+        id: it.id,
+        item_name: it.item_name,
+        item_price: Number(it.item_price),
+        quantity: it.quantity,
+      }));
+    }
+  }
+
+  // Cashier name (created_by → restaurant_users.display_name).
+  let cashier_name: string | null = null;
+  if (p.created_by) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: u } = await (service as any)
+      .from("restaurant_users")
+      .select("display_name")
+      .eq("id", p.created_by)
+      .maybeSingle();
+    cashier_name = u?.display_name ?? null;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: rest } = await (service as any)
+    .from("restaurants")
+    .select("name, address, contact_phone, pan_vat_number, settings")
+    .eq("id", ru.restaurant_id)
+    .maybeSingle();
+
+  const location = p.sessions?.restaurant_tables?.number
+    ? `Table ${p.sessions.restaurant_tables.number}`
+    : p.sessions?.rooms?.number
+    ? `Room ${p.sessions.rooms.number}`
+    : p.sessions?.type === "walk_in"
+    ? "Walk-in"
+    : "—";
+
+  return {
+    payment_id: p.id,
+    created_at: p.created_at,
+    method: p.payment_method,
+    cash_amount: Number(p.cash_amount ?? 0),
+    online_amount: Number(p.online_amount ?? 0),
+    total: Number(p.total_amount ?? p.amount ?? 0),
+    cashier_name,
+    order_ids,
+    location,
+    restaurant: {
+      name: rest?.name ?? "Restaurant",
+      address: rest?.address ?? null,
+      contact_phone: rest?.contact_phone ?? null,
+      pan_vat_number: rest?.pan_vat_number ?? null,
+      tax_percent: settingsNumber(rest?.settings, "tax_percent", "tax_rate", "gst_percent"),
+      service_charge_percent: settingsNumber(rest?.settings, "service_charge_percent", "service_charge"),
+    },
+    items,
+  };
+}
