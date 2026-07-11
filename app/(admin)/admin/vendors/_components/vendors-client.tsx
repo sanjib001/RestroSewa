@@ -25,6 +25,7 @@ import type {
   VendorRow,
   VendorSummary,
 } from "@/app/actions/vendors";
+import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal, ConfirmDialog } from "../../_components/modal";
@@ -483,6 +484,9 @@ export function VendorsClient({
   useEffect(() => { setPage(1); }, [search, filter]);
 
   const refresh = useCallback(() => reload(search, filter), [reload, search, filter]);
+
+  // A purchase on credit raises a vendor balance — that must show up here live.
+  useRealtime(["vendors", "purchases"], refresh);
 
   const pageCount = Math.max(1, Math.ceil(vendors.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);

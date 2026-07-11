@@ -3,6 +3,7 @@ import type { TableStatus } from "@/app/actions/pos";
 import { buildVisibilityFilter } from "@/lib/assignments";
 import type { RestaurantUserContext } from "@/lib/auth/guards";
 import { createServiceClient } from "@/lib/supabase/service";
+import { RealtimeRefresh } from "@/components/realtime-refresh";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
@@ -139,6 +140,12 @@ export async function TablesSection({ restaurantUser }: { restaurantUser: Restau
 
   return (
     <div>
+      {/* THE fix for "waiter activates C1, cashier still sees it free". A session
+          opening/closing fires a `tables` event, and this re-runs the section in
+          place — every dashboard updates without anyone refreshing. Order items
+          also move a table's status, so `orders` is watched too. */}
+      <RealtimeRefresh topics={["tables", "orders"]} />
+
       {/* Tables */}
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Tables</p>

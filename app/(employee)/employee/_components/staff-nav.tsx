@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useTransition } from "react";
 import { logout } from "@/app/actions/auth";
-import { LogOut } from "lucide-react";
+import { Home, LogOut } from "lucide-react";
 import { NotificationBell } from "./notification-bell";
 
 // The staff top bar. STICKY: it stays pinned while the dashboard scrolls, so
@@ -22,6 +23,8 @@ export function StaffNav({
   notificationCount?: number;
 }) {
   const [pending, startTransition] = useTransition();
+  const pathname = usePathname();
+  const atHome = pathname === "/employee/dashboard";
 
   return (
     <header
@@ -47,7 +50,23 @@ export function StaffNav({
         </span>
       </Link>
 
-      {/* Notifications — the bell owns the dropdown, the badge and the polling. */}
+      {/* Home — one tap back to the dashboard from a session, queue or menu
+          screen. The label collapses on narrow phones; the icon never does. */}
+      <Link
+        href="/employee/dashboard"
+        aria-label="Home"
+        aria-current={atHome ? "page" : undefined}
+        className="flex items-center gap-1 px-2 sm:px-3 py-1.5 rounded-lg text-sm transition-colors"
+        style={{
+          color: atHome ? "#fff" : "rgba(255,255,255,0.85)",
+          background: atHome ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.08)",
+        }}
+      >
+        <Home size={15} strokeWidth={1.5} />
+        <span className="hidden sm:inline">Home</span>
+      </Link>
+
+      {/* Notifications — the bell owns the dropdown, the badge and the stream. */}
       <NotificationBell initialCount={notificationCount} />
 
       <button

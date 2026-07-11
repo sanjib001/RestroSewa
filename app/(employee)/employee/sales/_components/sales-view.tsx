@@ -5,6 +5,7 @@ import { getSalesReport, exportSalesCsv } from "@/app/actions/pos";
 import type { SalesPeriod, SalesReport, SalesTxn } from "@/app/actions/pos";
 import { SETTLEMENT_COLOR, SETTLEMENT_LABEL } from "@/lib/credits";
 import type { CreditStats } from "@/lib/credits";
+import { useRealtime } from "@/lib/realtime/use-realtime";
 import { PaidBillButton } from "./paid-bill";
 
 // Fallback for a report that predates credits (a stale client-router payload).
@@ -244,6 +245,13 @@ export function SalesView({ initial, embedded = false }: { initial: SalesReport;
       setExporting(false);
     }
   }, [period, customFrom, customTo]);
+
+  // A bill closed at any till updates takings here at once.
+  const resync = useCallback(
+    () => load(period, customFrom || undefined, customTo || undefined),
+    [load, period, customFrom, customTo]
+  );
+  useRealtime(["billing", "credits"], resync);
 
   const groups = useMemo(() => groupByDate(report.transactions), [report.transactions]);
 

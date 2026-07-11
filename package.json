@@ -20,7 +20,9 @@
     "radix-ui": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "tailwind-merge": "latest"
+    "tailwind-merge": "latest",
+    "pg": "^8.21.0",
+    "@types/pg": "^8.11.10"
   },
   "devDependencies": {
     "@next/eslint-plugin-next": "latest",
@@ -29,7 +31,6 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "eslint": "latest",
-    "pg": "^8.21.0",
     "tailwindcss": "latest",
     "typescript": "latest"
   }

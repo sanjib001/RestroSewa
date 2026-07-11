@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
 } from "react";
+import { useRealtime } from "@/lib/realtime/use-realtime";
 import type { CategoryRow, MenuItemRow } from "@/app/actions/menu";
 import {
   sendNotification,
@@ -75,7 +76,9 @@ import {
 
 // ─── Config ─────────────────────────────────────────────────────────────────────
 
-const POLL_MS = 8000;
+// The customer now gets pushed updates over SSE; this is only a safety net for a
+// dropped stream (flaky café wifi, phone waking from sleep).
+const POLL_MS = 60000;
 
 type FoodKey = "veg" | "non_veg" | "vegan" | "egg";
 
@@ -1239,6 +1242,18 @@ export function CustomerMenu({
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const seenReadyRef = useRef<Set<string>>(new Set());
+  // Set by the polling effect below; called by the realtime stream.
+  const pollRef = useRef<null | (() => void)>(null);
+
+  // The customer's phone is pushed to as well: an order going ready, a waiter
+  // acknowledging the call, the table being activated, or the menu changing all
+  // land instantly. Scoped by session id — the stream carries only topic names,
+  // so an unauthenticated guest can never receive data they shouldn't see.
+  useRealtime(
+    ["orders", "notifications", "tables", "menu"],
+    useCallback(() => pollRef.current?.(), []),
+    activeSessionId
+  );
 
   // Service requests
   const [serviceNotif, setServiceNotif] = useState<CustomerNotifState>(initialNotifState);
@@ -1356,12 +1371,17 @@ export function CustomerMenu({
       }
     }
 
+    // Hand the poller to the realtime stream, so a kitchen update / waiter
+    // acknowledgement reaches the customer's phone the moment it happens.
+    pollRef.current = poll;
+
     poll();
     const iv = setInterval(poll, POLL_MS);
     const onVisible = () => document.visibilityState === "visible" && poll();
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       active = false;
+      pollRef.current = null;
       clearInterval(iv);
       document.removeEventListener("visibilitychange", onVisible);
     };

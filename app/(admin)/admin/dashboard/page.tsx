@@ -2,6 +2,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { getDashboardAnalytics } from "@/app/actions/analytics";
 import { StockFinanceOverview } from "./_components/stock-finance-overview";
+import { RealtimeRefresh } from "@/components/realtime-refresh";
 import Link from "next/link";
 import { BookOpen, LayoutGrid, Zap, Users } from "lucide-react";
 
@@ -120,6 +121,12 @@ export default async function AdminDashboardPage() {
 
   return (
     <div className="p-4 md:p-8">
+      {/* Live stats: any sale, purchase, stock move or credit change re-runs this
+          page in place, so the admin never refreshes to see today's numbers. */}
+      <RealtimeRefresh
+        topics={["billing", "credits", "stock", "purchases", "vendors", "finance", "orders", "tables"]}
+      />
+
       <h1
         className="text-xl mb-1"
         style={{ color: "var(--color-ink)", fontWeight: 300, letterSpacing: "-0.4px" }}

@@ -16,6 +16,7 @@ import {
   PURCHASE_STATUS_LABEL,
 } from "@/lib/finance";
 import type { FinancePeriod, FinancePurchase, FinanceReport } from "@/lib/finance";
+import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "../../_components/modal";
@@ -330,6 +331,13 @@ export function FinanceClient({
     setReport(rep);
     setOpening(op);
   }, [period, customFrom, customTo]);
+
+  // Sales, purchases, credit and vendor payments all move these figures.
+  const resync = useCallback(
+    () => load(period, customFrom || undefined, customTo || undefined),
+    [load, period, customFrom, customTo]
+  );
+  useRealtime(["billing", "credits", "purchases", "vendors", "finance"], resync);
 
   const netMovement = report.closingNet - (report.openingCash + report.openingOnline);
   const periodLabel = PERIOD_LABEL[report.period];

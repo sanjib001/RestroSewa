@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { getMyOrderQueue, updateOrderItemStatus } from "@/app/actions/pos";
 import type { QueueOrder, QueueOrderItem } from "@/app/actions/pos";
+import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Clock, User } from "lucide-react";
 
-const POLL_MS = 8000;
+// Orders now arrive by push. This is a safety net for a dropped SSE stream only.
+const FALLBACK_POLL_MS = 60_000;
 
 const STATUS_META: Record<QueueOrder["status"], { label: string; color: string; bg: string }> = {
   pending: { label: "Pending", color: "#f97316", bg: "#fff7ed" },
@@ -158,16 +160,17 @@ export function OrdersQueue({
     }
   }, []);
 
+  // A new order, or the kitchen flipping an item to ready/served, lands here
+  // immediately instead of up to 8s later.
+  useRealtime(["orders"], refresh);
+
   useEffect(() => {
     activeRef.current = true;
     refresh();
-    const iv = setInterval(refresh, POLL_MS);
-    const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
-    document.addEventListener("visibilitychange", onVisible);
+    const iv = setInterval(refresh, FALLBACK_POLL_MS);
     return () => {
       activeRef.current = false;
       clearInterval(iv);
-      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [refresh]);
 

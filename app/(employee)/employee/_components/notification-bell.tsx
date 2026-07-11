@@ -9,9 +9,12 @@ import {
 } from "@/app/actions/notifications";
 import type { NotificationRow } from "@/app/actions/notifications";
 import { approveTableActivation, rejectTableActivation } from "@/app/actions/pos";
+import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Bell, Check, CheckCheck, DoorOpen, Loader2, UtensilsCrossed, X } from "lucide-react";
 
-const POLL_MS = 8000;
+// Notifications now arrive by push. This is only a safety net in case the SSE
+// stream is down (proxy, sleep/resume) — hence the long interval.
+const FALLBACK_POLL_MS = 60_000;
 
 const TYPE_CONFIG = {
   call_waiter: { label: "Waiter Call", Icon: Bell, color: "#6366f1" },
@@ -216,17 +219,14 @@ export function NotificationBell({ initialCount = 0 }: { initialCount?: number }
     }
   }, [router]);
 
+  // A notification row changing anywhere fires instantly — no 8s wait for the
+  // waiter call to appear.
+  useRealtime(["notifications"], poll);
+
   useEffect(() => {
     poll();
-    const iv = setInterval(poll, POLL_MS);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") poll();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      clearInterval(iv);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
+    const iv = setInterval(poll, FALLBACK_POLL_MS);
+    return () => clearInterval(iv);
   }, [poll]);
 
   // Close on outside click / Escape.

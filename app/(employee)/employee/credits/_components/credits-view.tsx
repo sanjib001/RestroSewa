@@ -15,6 +15,7 @@ import type {
 } from "@/app/actions/credits";
 import type { CreditStats } from "@/lib/credits";
 import { CREDIT_STATUS_COLOR, CREDIT_STATUS_LABEL } from "@/lib/credits";
+import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CreditReceiptButton } from "./credit-receipt";
@@ -540,6 +541,10 @@ export function CreditsView({
   }, [search, status, reload]);
 
   const refresh = useCallback(() => reload(search, status), [reload, search, status]);
+
+  // A bill closed on credit, or a repayment taken at another till, lands here at
+  // once — no refresh, no stale balance.
+  useRealtime(["credits", "billing"], refresh);
 
   return (
     <div className={embedded ? "" : "p-4 sm:p-5 max-w-2xl mx-auto"}>

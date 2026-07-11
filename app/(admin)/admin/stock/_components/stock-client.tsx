@@ -43,6 +43,7 @@ import {
   todayISO,
 } from "@/lib/stock";
 import type { StockMovement } from "@/lib/stock";
+import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal, ConfirmDialog } from "../../_components/modal";
@@ -920,6 +921,10 @@ export function StockClient({
   useEffect(() => { setPage(1); }, [search, filter, day]);
 
   const refresh = useCallback(() => reload(search, filter, day), [reload, search, filter, day]);
+
+  // Stock moves from three places: a POS sale, a purchase, and a manual
+  // deduction. All three push here.
+  useRealtime(["stock", "purchases", "orders"], refresh);
 
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);

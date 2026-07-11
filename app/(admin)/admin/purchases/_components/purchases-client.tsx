@@ -24,6 +24,7 @@ import type {
   VendorOption,
 } from "@/app/actions/purchases";
 import { qty } from "@/lib/stock";
+import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "../../_components/modal";
@@ -535,6 +536,8 @@ export function PurchasesClient({
   useEffect(() => { setPage(1); }, [search, filter]);
 
   const refresh = useCallback(() => reload(search, filter), [reload, search, filter]);
+
+  useRealtime(["purchases", "vendors"], refresh);
 
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
