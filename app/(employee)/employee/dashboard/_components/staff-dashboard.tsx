@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ListOrdered, Banknote, LayoutGrid, BookOpen, ChevronDown, HandCoins } from "lucide-react";
 
 export type SectionKey = "orders" | "sales" | "credits" | "tables" | "menu";
@@ -77,10 +77,26 @@ function SectionCard({ section, className }: { section: DashboardSection; classN
 // and reflows its OWN content with responsive grids (Tables auto-fill cards,
 // Sales auto-fit stat tiles) — so sections use the space without being squeezed
 // into narrow half-columns. Orders stays first (most-used).
-export function StaffDashboard({ sections }: { sections: DashboardSection[] }) {
+export function StaffDashboard({
+  sections,
+  focus,
+}: {
+  sections: DashboardSection[];
+  /** Section to scroll to on arrival — set when a bill was just put on credit. */
+  focus?: SectionKey | null;
+}) {
   const jump = (key: SectionKey) => {
     document.getElementById(`sec-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+
+  // Arriving from a credit bill: switch to the Credits section rather than
+  // leaving the cashier at the top of the dashboard hunting for it.
+  useEffect(() => {
+    if (!focus) return;
+    // Next paint, so the section is mounted before we scroll to it.
+    const t = setTimeout(() => jump(focus), 50);
+    return () => clearTimeout(t);
+  }, [focus]);
 
   return (
     <div className="pb-10">

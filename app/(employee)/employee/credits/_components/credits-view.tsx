@@ -9,9 +9,9 @@ import {
 } from "@/app/actions/credits";
 import type {
   ActionResult,
-  CreditDetail,
+  CreditCustomer,
+  CreditCustomerDetail,
   CreditFilter,
-  CreditListItem,
 } from "@/app/actions/credits";
 import type { CreditStats } from "@/lib/credits";
 import { CREDIT_STATUS_COLOR, CREDIT_STATUS_LABEL } from "@/lib/credits";
@@ -39,9 +39,8 @@ const METHOD_LABEL: Record<string, string> = {
 
 const FILTERS: { key: CreditFilter; label: string }[] = [
   { key: "all", label: "All" },
-  { key: "pending", label: "Pending" },
-  { key: "partially_paid", label: "Partially Paid" },
-  { key: "fully_paid", label: "Fully Paid" },
+  { key: "owing", label: "Owes money" },
+  { key: "settled", label: "Settled" },
 ];
 
 const REPAYMENT_METHODS = [
@@ -64,93 +63,98 @@ function StatTile({ label, value, tone }: { label: string; value: string; tone?:
   );
 }
 
-function StatusPill({ status }: { status: CreditListItem["status"] }) {
-  const color = CREDIT_STATUS_COLOR[status];
-  return (
-    <span
-      className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full border shrink-0"
-      style={{ color, borderColor: `${color}44`, background: `${color}11`, letterSpacing: "0.06em" }}
-    >
-      {CREDIT_STATUS_LABEL[status]}
-    </span>
-  );
-}
-
-function CreditCard({ credit, onOpen }: { credit: CreditListItem; onOpen: () => void }) {
-  const settled = credit.status === "fully_paid";
+// One row per CUSTOMER — their single Credit ID and their whole balance.
+function CustomerCard({
+  customer,
+  onOpen,
+  highlight,
+}: {
+  customer: CreditCustomer;
+  onOpen: () => void;
+  highlight?: boolean;
+}) {
+  const settled = customer.balance <= 0;
   return (
     <button
       type="button"
       onClick={onOpen}
       className="w-full rounded-xl border px-4 py-3 text-left transition-colors"
       style={{
-        background: "var(--color-canvas)",
-        borderColor: "var(--color-hairline)",
-        opacity: settled ? 0.7 : 1,
+        background: highlight ? "#fff7ed" : "var(--color-canvas)",
+        borderColor: highlight ? "#f97316" : "var(--color-hairline)",
+        borderWidth: highlight ? 1.5 : 1,
+        opacity: settled && !highlight ? 0.7 : 1,
       }}
     >
       <div className="flex items-center gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-medium truncate" style={{ color: "var(--color-ink)" }}>
-              {credit.customer_name}
+              {customer.name}
             </p>
-            <StatusPill status={credit.status} />
+            <span
+              className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full border shrink-0"
+              style={{
+                color: settled ? CREDIT_STATUS_COLOR.fully_paid : CREDIT_STATUS_COLOR.pending,
+                borderColor: `${settled ? CREDIT_STATUS_COLOR.fully_paid : CREDIT_STATUS_COLOR.pending}44`,
+                background: `${settled ? CREDIT_STATUS_COLOR.fully_paid : CREDIT_STATUS_COLOR.pending}11`,
+                letterSpacing: "0.06em",
+              }}
+            >
+              {settled ? CREDIT_STATUS_LABEL.fully_paid : "Owes"}
+            </span>
           </div>
           <p className="text-xs mt-0.5 truncate" style={{ color: "var(--color-ink-mute)" }}>
-            {credit.credit_number}
-            {credit.customer_phone ? ` · ${credit.customer_phone}` : ""}
+            {customer.customer_code}
+            {customer.phone ? ` · ${customer.phone}` : ""}
             {" · "}
-            {credit.location}
-            {" · "}
-            {new Date(credit.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+            {customer.bill_count} bill{customer.bill_count !== 1 ? "s" : ""}
           </p>
         </div>
         <div className="text-right shrink-0">
           <p
             className="text-sm font-medium tabular-nums"
-            style={{ color: settled ? "var(--color-ink-mute)" : CREDIT_STATUS_COLOR[credit.status] }}
+            style={{ color: settled ? "var(--color-ink-mute)" : "#dc2626" }}
           >
-            {money(credit.balance)}
+            {settled ? "Settled" : money(customer.balance)}
           </p>
-          <p className="text-[10px]" style={{ color: "var(--color-ink-mute)" }}>
-            {settled ? "settled" : `of ${money(credit.bill_amount)}`}
-          </p>
+          {!settled && (
+            <p className="text-[10px]" style={{ color: "var(--color-ink-mute)" }}>outstanding</p>
+          )}
         </div>
       </div>
     </button>
   );
 }
 
-// ── Detail: full history + record a repayment ─────────────────────────────────
+// ── Account detail: balance, bills, payments, take money ──────────────────────
 
-function CreditDetailModal({
-  creditId,
+function CustomerDetailModal({
+  customerId,
   onClose,
   onChanged,
 }: {
-  creditId: string;
+  customerId: string;
   onClose: () => void;
   onChanged: () => void;
 }) {
-  const [detail, setDetail] = useState<CreditDetail | null>(null);
+  const [detail, setDetail] = useState<CreditCustomerDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("cash");
   const [state, action, pending] = useActionState<ActionResult, FormData>(addCreditPayment, null);
 
   const load = useCallback(async () => {
-    const res = await getCreditDetail(creditId);
+    const res = await getCreditDetail(customerId);
     if ("error" in res) setLoadError(res.error);
     else setDetail(res);
-  }, [creditId]);
+  }, [customerId]);
 
   useEffect(() => { load(); }, [load]);
 
   // `addCreditPayment` returns null both before the first submit and after a
   // successful one, so success can't be read from `state` alone — watch the
-  // falling edge of `pending` instead. On success reload the credit (balance,
-  // status, history all moved) and refresh the list behind the modal.
+  // falling edge of `pending`.
   const wasPending = useRef(false);
   useEffect(() => {
     if (wasPending.current && !pending && !state?.error) {
@@ -162,7 +166,7 @@ function CreditDetailModal({
   }, [pending, state, load, onChanged]);
 
   const balance = detail?.balance ?? 0;
-  const settled = detail?.status === "fully_paid";
+  const settled = balance <= 0;
   const amountNum = parseFloat(amount) || 0;
   const amountValid = amountNum > 0 && amountNum <= balance + 0.005;
 
@@ -182,7 +186,7 @@ function CreditDetailModal({
           style={{ borderColor: "var(--color-hairline)" }}
         >
           <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
-            {detail ? `${detail.credit_number} · ${detail.customer_name}` : "Credit"}
+            {detail ? `${detail.name} · ${detail.customer_code}` : "Credit account"}
           </p>
           <button
             type="button"
@@ -210,7 +214,7 @@ function CreditDetailModal({
 
           {detail && (
             <>
-              {/* Balance summary */}
+              {/* One balance for the whole account, however many bills sit under it. */}
               <div
                 className="rounded-xl border px-4 py-3 flex flex-col gap-1.5"
                 style={{
@@ -219,15 +223,15 @@ function CreditDetailModal({
                 }}
               >
                 <div className="flex items-center justify-between text-sm">
-                  <span style={{ color: "var(--color-ink-mute)" }}>Original bill</span>
+                  <span style={{ color: "var(--color-ink-mute)" }}>Billed on credit</span>
                   <span className="tabular-nums" style={{ color: "var(--color-ink)" }}>
-                    {money2(detail.bill_amount)}
+                    {money2(detail.total_billed)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span style={{ color: "var(--color-ink-mute)" }}>Paid so far</span>
                   <span className="tabular-nums" style={{ color: "var(--color-ink)" }}>
-                    − {money2(detail.paid_amount)}
+                    − {money2(detail.total_paid)}
                   </span>
                 </div>
                 <div
@@ -235,7 +239,7 @@ function CreditDetailModal({
                   style={{ borderColor: settled ? "#1a7a4a22" : "#f9731633" }}
                 >
                   <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
-                    {settled ? "Settled" : "Balance due"}
+                    {settled ? "Settled" : "Outstanding"}
                   </span>
                   <span
                     className="text-lg font-medium tabular-nums"
@@ -246,51 +250,35 @@ function CreditDetailModal({
                 </div>
               </div>
 
-              {/* Meta */}
               <div className="flex flex-col gap-1 text-xs" style={{ color: "var(--color-ink-mute)" }}>
                 <div className="flex justify-between gap-3">
-                  <span>Opened</span>
-                  <span style={{ color: "var(--color-ink)" }}>
-                    {new Date(detail.created_at).toLocaleString("en-IN", {
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                    })}
-                  </span>
+                  <span>Credit ID</span>
+                  <span style={{ color: "var(--color-ink)" }}>{detail.customer_code}</span>
                 </div>
-                {detail.customer_phone && (
+                {detail.phone && (
                   <div className="flex justify-between gap-3">
                     <span>Phone</span>
-                    <a href={`tel:${detail.customer_phone}`} style={{ color: "var(--color-primary)" }}>
-                      {detail.customer_phone}
+                    <a href={`tel:${detail.phone}`} style={{ color: "var(--color-primary)" }}>
+                      {detail.phone}
                     </a>
                   </div>
                 )}
                 <div className="flex justify-between gap-3">
-                  <span>Bill</span>
-                  <span style={{ color: "var(--color-ink)" }}>{detail.location}</span>
+                  <span>Customer since</span>
+                  <span style={{ color: "var(--color-ink)" }}>
+                    {new Date(detail.created_at).toLocaleDateString("en-IN", { dateStyle: "medium" })}
+                  </span>
                 </div>
-                {detail.created_by_name && (
-                  <div className="flex justify-between gap-3">
-                    <span>Billed by</span>
-                    <span style={{ color: "var(--color-ink)" }}>{detail.created_by_name}</span>
-                  </div>
-                )}
-                {detail.notes && (
-                  <div className="flex justify-between gap-3">
-                    <span>Note</span>
-                    <span className="text-right" style={{ color: "var(--color-ink)" }}>{detail.notes}</span>
-                  </div>
-                )}
               </div>
 
-              {/* Record a payment — hidden once there's nothing left to collect. */}
+              {/* Take money against the ACCOUNT — it settles their oldest bills first. */}
               {!settled && (
                 <form
                   action={action}
                   className="rounded-xl border px-4 py-4 flex flex-col gap-3"
                   style={{ background: "var(--color-canvas-soft)", borderColor: "var(--color-hairline)" }}
                 >
-                  <input type="hidden" name="credit_id" value={detail.id} />
+                  <input type="hidden" name="customer_id" value={detail.id} />
                   <input type="hidden" name="method" value={method} />
 
                   <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
@@ -370,7 +358,7 @@ function CreditDetailModal({
                   {amount !== "" && !amountValid && (
                     <p className="text-xs" style={{ color: "var(--color-ruby)" }}>
                       {amountNum > balance
-                        ? `That's more than the ${money2(balance)} still owed.`
+                        ? `That's more than the ${money2(balance)} they owe.`
                         : "Enter an amount greater than zero."}
                     </p>
                   )}
@@ -390,7 +378,56 @@ function CreditDetailModal({
                 </form>
               )}
 
-              {/* Payment history */}
+              {/* Bills under this ONE account */}
+              <div>
+                <p
+                  className="text-xs uppercase tracking-wide mb-2 font-medium"
+                  style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+                >
+                  Bills on credit ({detail.bills.length})
+                </p>
+                <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--color-hairline)" }}>
+                  {detail.bills.map((b, i) => (
+                    <div
+                      key={b.id}
+                      className="flex items-start gap-3 px-4 py-2.5"
+                      style={{
+                        borderTop: i === 0 ? "none" : "1px solid var(--color-hairline)",
+                        background: "var(--color-canvas)",
+                      }}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm" style={{ color: "var(--color-ink)" }}>
+                          {b.credit_number}
+                          <span className="ml-1.5 text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                            {b.location}
+                          </span>
+                        </p>
+                        <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                          {new Date(b.created_at).toLocaleString("en-IN", {
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                          })}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-sm tabular-nums" style={{ color: "var(--color-ink)" }}>
+                          {money2(b.bill_amount)}
+                        </p>
+                        <p
+                          className="text-[10px] uppercase tracking-wide"
+                          style={{ color: CREDIT_STATUS_COLOR[b.status], letterSpacing: "0.06em" }}
+                        >
+                          {CREDIT_STATUS_LABEL[b.status]}
+                          {b.balance > 0 && ` · ${money(b.balance)} left`}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Payment history for the account */}
               <div>
                 <p
                   className="text-xs uppercase tracking-wide mb-2 font-medium"
@@ -398,23 +435,20 @@ function CreditDetailModal({
                 >
                   Payment history
                 </p>
-                {detail.history.length === 0 ? (
+                {detail.payments.length === 0 ? (
                   <div
                     className="rounded-xl border px-4 py-6 text-center"
                     style={{ borderStyle: "dashed", borderColor: "var(--color-hairline)" }}
                   >
                     <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
-                      Nothing paid yet — the full bill is outstanding.
+                      No payments received yet.
                     </p>
                   </div>
                 ) : (
-                  <div
-                    className="rounded-xl border overflow-hidden"
-                    style={{ borderColor: "var(--color-hairline)" }}
-                  >
-                    {detail.history.map((h, i) => (
+                  <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--color-hairline)" }}>
+                    {detail.payments.map((p, i) => (
                       <div
-                        key={h.id}
+                        key={p.id}
                         className="flex items-start gap-3 px-4 py-2.5"
                         style={{
                           borderTop: i === 0 ? "none" : "1px solid var(--color-hairline)",
@@ -423,31 +457,23 @@ function CreditDetailModal({
                       >
                         <div className="flex-1 min-w-0">
                           <p className="text-sm" style={{ color: "var(--color-ink)" }}>
-                            {METHOD_LABEL[h.method] ?? h.method}
-                            {h.at_billing && (
-                              <span className="ml-1.5 text-xs" style={{ color: "var(--color-ink-mute)" }}>
-                                at billing
-                              </span>
-                            )}
+                            {METHOD_LABEL[p.method] ?? p.method}
                           </p>
                           <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-                            {new Date(h.created_at).toLocaleString("en-IN", {
+                            {new Date(p.created_at).toLocaleString("en-IN", {
                               dateStyle: "medium",
                               timeStyle: "short",
                             })}
-                            {h.staff_name ? ` · ${h.staff_name}` : ""}
+                            {p.staff_name ? ` · ${p.staff_name}` : ""}
                           </p>
-                          {h.notes && (
+                          {p.notes && (
                             <p className="text-xs italic mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
-                              {h.notes}
+                              {p.notes}
                             </p>
                           )}
                         </div>
-                        <p
-                          className="text-sm font-medium tabular-nums shrink-0"
-                          style={{ color: "#1a7a4a" }}
-                        >
-                          {money2(h.amount)}
+                        <p className="text-sm font-medium tabular-nums shrink-0" style={{ color: "#1a7a4a" }}>
+                          {money2(p.amount)}
                         </p>
                       </div>
                     ))}
@@ -455,7 +481,7 @@ function CreditDetailModal({
                 )}
               </div>
 
-              <CreditReceiptButton creditId={detail.id} />
+              <CreditReceiptButton customerId={detail.id} />
             </>
           )}
         </div>
@@ -472,17 +498,21 @@ export function CreditsView({
   initialOpenId = null,
   embedded = false,
 }: {
-  initialCredits: CreditListItem[];
+  initialCredits: CreditCustomer[];
   initialSummary: CreditStats;
+  /** The account to open on arrival — set after a bill is closed on credit. */
   initialOpenId?: string | null;
   embedded?: boolean;
 }) {
-  const [credits, setCredits] = useState(initialCredits);
+  const [customers, setCustomers] = useState(initialCredits);
   const [summary, setSummary] = useState(initialSummary);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<CreditFilter>("all");
   const [openId, setOpenId] = useState<string | null>(initialOpenId);
   const [loading, startTransition] = useTransition();
+
+  // The account just billed stays highlighted in the list behind the modal.
+  const [highlightId] = useState<string | null>(initialOpenId);
 
   const reload = useCallback((s: string, st: CreditFilter) => {
     startTransition(async () => {
@@ -491,7 +521,7 @@ export function CreditsView({
           getCredits({ search: s, status: st }),
           getCreditSummary(),
         ]);
-        setCredits(rows);
+        setCustomers(rows);
         setSummary(sum);
       } catch {
         // keep the last known list on a transient failure
@@ -499,8 +529,6 @@ export function CreditsView({
     });
   }, []);
 
-  // Debounced search / filter. Skips the very first run — the server already
-  // rendered the unfiltered list.
   const mounted = useRef(false);
   useEffect(() => {
     if (!mounted.current) {
@@ -525,12 +553,11 @@ export function CreditsView({
       )}
       <p className="text-sm mb-5" style={{ color: "var(--color-ink-mute)" }}>
         {summary.openCount === 0
-          ? "No open credits — everything is settled."
-          : `${summary.openCount} open credit${summary.openCount !== 1 ? "s" : ""} · ${money(summary.outstanding)} outstanding`}
+          ? "No one owes anything — everything is settled."
+          : `${summary.openCount} customer${summary.openCount !== 1 ? "s" : ""} owe ${money(summary.outstanding)}`}
         {loading && <span className="ml-2">Updating…</span>}
       </p>
 
-      {/* Stat tiles */}
       <div
         className="grid gap-3 mb-4"
         style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}
@@ -541,12 +568,10 @@ export function CreditsView({
           tone={summary.outstanding > 0 ? "#dc2626" : undefined}
         />
         <StatTile label="Collected today" value={money(summary.collected)} tone="#1a7a4a" />
-        <StatTile label="Pending" value={String(summary.pendingCount)} />
-        <StatTile label="Partially paid" value={String(summary.partiallyPaidCount)} />
-        <StatTile label="Fully paid" value={String(summary.fullyPaidCount)} />
+        <StatTile label="Customers owing" value={String(summary.pendingCount)} />
+        <StatTile label="Settled" value={String(summary.fullyPaidCount)} />
       </div>
 
-      {/* Search */}
       <div className="relative mb-3">
         <Search
           size={15}
@@ -555,14 +580,13 @@ export function CreditsView({
         />
         <Input
           type="search"
-          placeholder="Search by credit ID, name or phone…"
+          placeholder="Search by phone, name or credit ID…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="pl-9"
         />
       </div>
 
-      {/* Status filter */}
       <div className="flex gap-2 overflow-x-auto mb-4" style={{ scrollbarWidth: "none" }}>
         {FILTERS.map((f) => {
           const active = status === f.key;
@@ -584,29 +608,33 @@ export function CreditsView({
         })}
       </div>
 
-      {/* List */}
-      {credits.length === 0 ? (
+      {customers.length === 0 ? (
         <div
           className="rounded-xl border px-6 py-12 text-center"
           style={{ borderStyle: "dashed", borderColor: "var(--color-hairline)", background: "var(--color-canvas)" }}
         >
           <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
             {search || status !== "all"
-              ? "No credits match that search."
-              : "No credits yet. Choose Credit when closing a bill to record one."}
+              ? "No customers match that search."
+              : "No credit accounts yet. Choose Credit when closing a bill to open one."}
           </p>
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          {credits.map((c) => (
-            <CreditCard key={c.id} credit={c} onOpen={() => setOpenId(c.id)} />
+          {customers.map((c) => (
+            <CustomerCard
+              key={c.id}
+              customer={c}
+              highlight={c.id === highlightId}
+              onOpen={() => setOpenId(c.id)}
+            />
           ))}
         </div>
       )}
 
       {openId && (
-        <CreditDetailModal
-          creditId={openId}
+        <CustomerDetailModal
+          customerId={openId}
           onClose={() => setOpenId(null)}
           onChanged={refresh}
         />

@@ -615,12 +615,16 @@ export async function closeSessionWithPayment(
       return { error: "You don't have permission to put a bill on credit." };
     }
 
+    // Either the cashier picked an existing credit account (the returning
+    // customer), or they're creating one. Picking an existing account is what
+    // stops a regular from collecting a second Credit ID.
+    const customerId    = ((formData.get("credit_customer_id")    as string) || "").trim();
     const customerName  = ((formData.get("credit_customer_name")  as string) || "").trim();
     const customerPhone = ((formData.get("credit_customer_phone") as string) || "").trim();
     const creditNotes   = ((formData.get("credit_notes")          as string) || "").trim();
 
-    if (!customerName) {
-      return { error: "Enter the customer's name — a credit must be traceable to someone." };
+    if (!customerId && !customerName) {
+      return { error: "Choose an existing customer, or enter a name for a new credit account." };
     }
     if (totalAmount <= 0) return { error: "Invalid total amount." };
 
@@ -632,14 +636,16 @@ export async function closeSessionWithPayment(
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: credit, error } = await (service as any).rpc("close_bill_with_credit", {
+    const { data: customer, error } = await (service as any).rpc("close_bill_with_credit", {
       p_restaurant_id:  ru.restaurant_id,
       p_session_id:     sessionId,
       p_total:          totalAmount,
       p_cash:           cashAmount,
       p_online:         onlineAmount,
       p_card:           cardAmount,
-      p_customer_name:  customerName,
+      // An existing account wins; otherwise the RPC finds-or-creates one by phone.
+      p_customer_id:    customerId || null,
+      p_customer_name:  customerName || null,
       p_customer_phone: customerPhone || null,
       p_notes:          creditNotes || null,
       p_created_by:     ru.id,
@@ -656,6 +662,9 @@ export async function closeSessionWithPayment(
       if (msg.includes("CUSTOMER_NAME_REQUIRED")) {
         return { error: "Enter the customer's name." };
       }
+      if (msg.includes("CUSTOMER_NOT_FOUND")) {
+        return { error: "That customer's credit account no longer exists." };
+      }
       return { error: "Could not put this bill on credit. Please try again." };
     }
 
@@ -663,8 +672,11 @@ export async function closeSessionWithPayment(
     revalidatePath("/employee/credits");
     revalidatePath("/employee/sales");
     revalidatePath(`/employee/session/${sessionId}`);
-    // Land on the new credit record so the cashier can hand over its receipt.
-    redirect(`/employee/credits?open=${credit?.id ?? ""}`);
+
+    // Back to the STAFF DASHBOARD (not the standalone Credits page), which scrolls
+    // to its Credits section and opens this customer's account. `redirect` from a
+    // server action is a client-side RSC navigation, not a full page reload.
+    redirect(`/employee/dashboard?credit=${customer?.id ?? ""}`);
   }
 
   // ── Paid in full ────────────────────────────────────────────────────────────
@@ -1114,7 +1126,6 @@ export async function getSalesReport(params?: {
     collected: 0,
     created: 0,
     pendingCount: 0,
-    partiallyPaidCount: 0,
     fullyPaidCount: 0,
     openCount: 0,
   };
@@ -1142,7 +1153,8 @@ export async function getSalesReport(params?: {
   // Credit figures are only fetched for staff allowed to see customer debt.
   const canSeeCredits = NAV_ACCESS.canManageCredits(ru);
 
-  const [paymentsRes, creditsRes, repaymentsRes] = await Promise.all([
+  // Outstanding is counted over ACCOUNTS (who owes), credit-extended over BILLS.
+  const [paymentsRes, accountsRes, creditsRes, repaymentsRes] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("payments")
@@ -1154,8 +1166,15 @@ export async function getSalesReport(params?: {
     canSeeCredits
       ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (service as any)
+          .from("credit_customers")
+          .select("balance")
+          .eq("restaurant_id", ru.restaurant_id)
+      : Promise.resolve({ data: [] }),
+    canSeeCredits
+      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (service as any)
           .from("credits")
-          .select("bill_amount, down_payment, paid_amount, status, created_at")
+          .select("bill_amount, down_payment, created_at")
           .eq("restaurant_id", ru.restaurant_id)
       : Promise.resolve({ data: [] }),
     canSeeCredits
@@ -1275,6 +1294,8 @@ export async function getSalesReport(params?: {
     avgOrderValue,
     breakdown,
     credit: computeCreditStats(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (accountsRes.data ?? []) as any[],
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (creditsRes.data ?? []) as any[],
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -13,7 +13,6 @@ const EMPTY_CREDIT_STATS: CreditStats = {
   collected: 0,
   created: 0,
   pendingCount: 0,
-  partiallyPaidCount: 0,
   fullyPaidCount: 0,
   openCount: 0,
 };
@@ -420,9 +419,10 @@ export function SalesView({ initial, embedded = false }: { initial: SalesReport;
               label={`Credit created · ${PERIOD_LABEL[report.period]}`}
               value={money(credit.created)}
             />
-            <StatTile label="Pending" value={String(credit.pendingCount)} />
-            <StatTile label="Partially paid" value={String(credit.partiallyPaidCount)} />
-            <StatTile label="Fully paid" value={String(credit.fullyPaidCount)} />
+            {/* Counted over CUSTOMERS now — one person with three unpaid bills is
+                one debtor to chase, not three. */}
+            <StatTile label="Customers owing" value={String(credit.pendingCount)} />
+            <StatTile label="Settled customers" value={String(credit.fullyPaidCount)} />
           </div>
         </section>
       )}

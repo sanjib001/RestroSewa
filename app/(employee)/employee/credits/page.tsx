@@ -29,8 +29,9 @@ export default async function CreditsPage({
     <CreditsView
       initialCredits={credits}
       initialSummary={summary}
-      // Closing a bill on credit lands here with ?open=<id>, so the cashier drops
-      // straight into the credit they just created (to hand over its receipt).
+      // Deep link to one customer's account (?open=<customerId>). Closing a bill
+      // on credit now lands on the DASHBOARD's Credits section instead, so the
+      // cashier never leaves the staff dashboard.
       initialOpenId={open ?? null}
     />
   );

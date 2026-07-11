@@ -16,9 +16,10 @@ const METHOD_LABEL: Record<string, string> = {
   other: "Other",
 };
 
-// Prints the credit record — what was owed, what's been paid against it and the
-// balance as of now. Reassembled from the existing credit + ledger; creates nothing.
-export function CreditReceiptButton({ creditId }: { creditId: string }) {
+// Prints the customer's credit ACCOUNT — every bill they've run up, everything
+// they've paid, and the balance as of now, all under their one Credit ID.
+// Reassembled from existing records; creates nothing.
+export function CreditReceiptButton({ customerId }: { customerId: string }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [receipt, setReceipt] = useState<CreditReceipt | null>(null);
@@ -26,7 +27,7 @@ export function CreditReceiptButton({ creditId }: { creditId: string }) {
   async function load() {
     setLoading(true);
     try {
-      const res = await getCreditReceipt(creditId);
+      const res = await getCreditReceipt(customerId);
       if ("error" in res) {
         alert(res.error);
         return;
@@ -57,23 +58,37 @@ export function CreditReceiptButton({ creditId }: { creditId: string }) {
         <PrintModal open={open} onClose={() => setOpen(false)} title="Credit receipt — preview">
           <CreditReceiptTicket
             restaurant={receipt.restaurant}
-            creditNumber={receipt.credit.credit_number}
-            customerName={receipt.credit.customer_name}
-            customerPhone={receipt.credit.customer_phone}
-            openedAt={new Date(receipt.credit.created_at)}
-            location={receipt.credit.location}
-            billAmount={receipt.credit.bill_amount}
-            paidAmount={receipt.credit.paid_amount}
-            balance={receipt.credit.balance}
-            notes={receipt.credit.notes}
-            history={receipt.credit.history.map((h) => ({
-              id: h.id,
-              amount: h.amount,
-              method: METHOD_LABEL[h.method] ?? h.method,
-              staff_name: h.staff_name,
-              created_at: h.created_at,
-              at_billing: h.at_billing,
-            }))}
+            creditNumber={receipt.customer.customer_code}
+            customerName={receipt.customer.name}
+            customerPhone={receipt.customer.phone}
+            openedAt={new Date(receipt.customer.created_at)}
+            location={`${receipt.customer.bill_count} bill${receipt.customer.bill_count !== 1 ? "s" : ""}`}
+            billAmount={receipt.customer.total_billed}
+            paidAmount={receipt.customer.total_paid}
+            balance={receipt.customer.balance}
+            notes={null}
+            // The down payments taken at billing, then every repayment since —
+            // everything this customer has handed over, under one Credit ID.
+            history={[
+              ...receipt.customer.bills
+                .filter((b) => b.down_payment > 0)
+                .map((b) => ({
+                  id: b.id,
+                  amount: b.down_payment,
+                  method: b.credit_number,
+                  staff_name: null,
+                  created_at: b.created_at,
+                  at_billing: true,
+                })),
+              ...receipt.customer.payments.map((p) => ({
+                id: p.id,
+                amount: p.amount,
+                method: METHOD_LABEL[p.method] ?? p.method,
+                staff_name: p.staff_name,
+                created_at: p.created_at,
+                at_billing: false,
+              })),
+            ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())}
           />
         </PrintModal>
       )}

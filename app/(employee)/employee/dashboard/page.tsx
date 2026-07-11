@@ -17,8 +17,16 @@ import type { DashboardSection } from "./_components/staff-dashboard";
 // is stacked vertically (Orders first). Section visibility is derived from the
 // exact same permission-driven nav (`getStaffNav`) that used to gate the separate
 // pages — the permission system is unchanged, only the layout is.
-export default async function EmployeeDashboardPage() {
+export default async function EmployeeDashboardPage({
+  searchParams,
+}: {
+  // Closing a bill on credit lands back HERE with ?credit=<accountId> — the
+  // dashboard scrolls to its Credits section and opens that customer's account,
+  // instead of throwing the cashier out to a separate page.
+  searchParams: Promise<{ credit?: string }>;
+}) {
   const { restaurantUser } = await requireRestaurantStaff();
+  const { credit: openCreditId } = await searchParams;
 
   const navKeys = new Set(getStaffNav(restaurantUser).map((n) => n.key));
   const sections: DashboardSection[] = [];
@@ -56,8 +64,15 @@ export default async function EmployeeDashboardPage() {
     sections.push({
       key: "credits",
       title: "Credits",
-      subtitle: "Unpaid balances & repayments",
-      body: <CreditsView initialCredits={credits} initialSummary={summary} embedded />,
+      subtitle: "Customer accounts & repayments",
+      body: (
+        <CreditsView
+          initialCredits={credits}
+          initialSummary={summary}
+          initialOpenId={openCreditId ?? null}
+          embedded
+        />
+      ),
     });
   }
 
@@ -96,5 +111,11 @@ export default async function EmployeeDashboardPage() {
     });
   }
 
-  return <StaffDashboard sections={sections} />;
+  return (
+    <StaffDashboard
+      sections={sections}
+      // Just billed to credit → land in the Credits section, not at the top.
+      focus={openCreditId ? "credits" : null}
+    />
+  );
 }

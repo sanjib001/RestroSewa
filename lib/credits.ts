@@ -38,12 +38,16 @@ const EPS = 0.005;
 export const isSettled = (billAmount: number, paidAmount: number) =>
   billAmount - paidAmount <= EPS;
 
-/** The rows these stats are computed from (a subset of the DB columns). */
+/** A customer's credit ACCOUNT — the unit the stats are now counted in. */
+export type CreditAccountRow = {
+  /** What this customer owes right now, across all their bills. */
+  balance: number;
+};
+
+/** A credit BILL. Only its "credit extended" contribution matters here. */
 export type CreditStatRow = {
   bill_amount: number;
   down_payment: number;
-  paid_amount: number;
-  status: CreditStatus;
   created_at: string;
 };
 
@@ -53,25 +57,33 @@ export type CreditRepaymentRow = {
 };
 
 export type CreditStats = {
-  /** Still owed across every open credit, as of now. Not period-scoped — a debt
+  /** Still owed across every customer, as of now. Not period-scoped — a debt
    *  doesn't belong to the window it was created in. */
   outstanding: number;
-  /** Repayments banked inside the selected period ("Credit Collected Today"). */
+  /** Payments banked inside the selected period ("Credit Collected Today"). */
   collected: number;
   /** Credit *extended* inside the period: the unpaid part of bills closed on
    *  credit during it. This is new debt taken on, not money received. */
   created: number;
-  /** Current status counts across all credits. */
+  /** CUSTOMERS who still owe something. One person with three unpaid bills is
+   *  one person to chase, not three — which is the whole point of the account. */
   pendingCount: number;
-  partiallyPaidCount: number;
+  /** Customers who are fully settled. */
   fullyPaidCount: number;
-  /** How many credits are still open (pending + partially paid). */
+  /** Same as pendingCount — kept so callers reading "open accounts" still work. */
   openCount: number;
 };
 
+/**
+ * Stats are counted over ACCOUNTS (who owes what) and BILLS (what credit was
+ * extended) separately, because they answer different questions. Summing bill
+ * balances would double-count a customer with several unpaid bills as several
+ * debtors.
+ */
 export function computeCreditStats(
-  credits: CreditStatRow[],
-  repayments: CreditRepaymentRow[],
+  accounts: CreditAccountRow[],
+  bills: CreditStatRow[],
+  payments: CreditRepaymentRow[],
   fromMs: number,
   toMs: number
 ): CreditStats {
@@ -80,36 +92,31 @@ export function computeCreditStats(
     collected: 0,
     created: 0,
     pendingCount: 0,
-    partiallyPaidCount: 0,
     fullyPaidCount: 0,
     openCount: 0,
   };
 
-  for (const c of credits) {
-    const bill = Number(c.bill_amount);
-    const paid = Number(c.paid_amount);
-    const balance = Math.max(0, bill - paid);
-
-    if (c.status === "fully_paid") {
-      stats.fullyPaidCount += 1;
-    } else {
-      // Outstanding is a "right now" figure, so every open credit counts
-      // regardless of when it was created.
+  for (const a of accounts) {
+    const balance = Number(a.balance);
+    if (balance > EPS) {
       stats.outstanding += balance;
-      stats.openCount += 1;
-      if (c.status === "pending") stats.pendingCount += 1;
-      else stats.partiallyPaidCount += 1;
+      stats.pendingCount += 1;
+    } else {
+      stats.fullyPaidCount += 1;
     }
+  }
+  stats.openCount = stats.pendingCount;
 
+  for (const b of bills) {
     // Credit extended during the period = the part of that bill left unpaid at
     // the moment it was billed (bill − down payment), not its balance today.
-    const ts = new Date(c.created_at).getTime();
+    const ts = new Date(b.created_at).getTime();
     if (ts >= fromMs && ts <= toMs) {
-      stats.created += Math.max(0, bill - Number(c.down_payment));
+      stats.created += Math.max(0, Number(b.bill_amount) - Number(b.down_payment));
     }
   }
 
-  for (const p of repayments) {
+  for (const p of payments) {
     const ts = new Date(p.created_at).getTime();
     if (ts >= fromMs && ts <= toMs) stats.collected += Number(p.amount);
   }
