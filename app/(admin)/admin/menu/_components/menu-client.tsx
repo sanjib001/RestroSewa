@@ -17,6 +17,7 @@ import {
   toggleCategoryStatus,
   toggleItemAvailability,
   deleteCategory,
+  moveCategory,
   createVariant,
   deleteVariant,
   createAddon,
@@ -36,6 +37,7 @@ import { Input } from "@/components/ui/input";
 import {
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Plus,
   Trash2,
   Pencil,
@@ -900,17 +902,23 @@ function CategoryAccordion({
   items,
   restaurantId,
   workstations,
+  isFirst = false,
+  isLast = false,
 }: {
   category: CategoryRow;
   items: MenuItemRow[];
   restaurantId: string;
   workstations: WorkstationRow[];
+  /** Ends of the list can't move further — the arrows disable rather than no-op. */
+  isFirst?: boolean;
+  isLast?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [addingItem, setAddingItem] = useState(false);
   const [, startToggle] = useTransition();
   const [, startDelete] = useTransition();
+  const [moving, startMove] = useTransition();
   const [editState, editAction, editPending] = useActionState<ActionResult, FormData>(updateCategory, null);
   const [editSubmitted, setEditSubmitted] = useState(false);
 
@@ -996,6 +1004,33 @@ function CategoryAccordion({
               </span>
             )}
           </button>
+
+          {/* Reorder. This order is what the CUSTOMER menu shows, so the arrows
+              are the only way to arrange it — the list is no longer alphabetical. */}
+          <div className="flex items-center">
+            <button
+              type="button"
+              title="Move up"
+              aria-label={`Move ${category.name} up`}
+              disabled={isFirst || moving}
+              onClick={() => startMove(async () => { await moveCategory(category.id, "up"); })}
+              className="p-1 rounded-md disabled:opacity-25"
+              style={{ color: "var(--color-ink-mute)" }}
+            >
+              <ChevronUp size={14} />
+            </button>
+            <button
+              type="button"
+              title="Move down"
+              aria-label={`Move ${category.name} down`}
+              disabled={isLast || moving}
+              onClick={() => startMove(async () => { await moveCategory(category.id, "down"); })}
+              className="p-1 rounded-md disabled:opacity-25"
+              style={{ color: "var(--color-ink-mute)" }}
+            >
+              <ChevronDown size={14} />
+            </button>
+          </div>
 
           <button
             type="button"
@@ -1126,13 +1161,15 @@ export function MenuClient({
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          {categories.map((c) => (
+          {categories.map((c, i) => (
             <CategoryAccordion
               key={c.id}
               category={c}
               items={items}
               restaurantId={restaurantId}
               workstations={workstations}
+              isFirst={i === 0}
+              isLast={i === categories.length - 1}
             />
           ))}
         </div>

@@ -53,6 +53,7 @@ import {
   ShieldCheck,
   Utensils,
   UtensilsCrossed,
+  LayoutGrid,
   Coffee,
   CupSoda,
   IceCreamCone,
@@ -172,6 +173,12 @@ function AnimationStyles() {
 }
 
 // ─── Small shared pieces ─────────────────────────────────────────────────────────
+
+// "All" is a VIRTUAL category — it is never stored, never fetched, and never
+// owns an item. This sentinel stands in for it in the same `activeCategoryId`
+// state the real categories use, so selecting it costs no extra state and no
+// extra request. A `__`-fenced literal cannot collide with a uuid.
+const ALL_CATEGORY_ID = "__all__";
 
 // The monogram that used to live here is now the FALLBACK inside
 // <RestaurantLogo>, so an uploaded logo and the initials share one component
@@ -1208,7 +1215,9 @@ export function CustomerMenu({
   const activationBlocks = noPin && (activationStatus === "pending" || activationStatus === "rejected");
   const canOrderNow = orderingAvailable && !activationBlocks;
 
-  const [activeCategoryId, setActiveCategoryId] = useState<string>(categories[0]?.id ?? "");
+  // Opens on "All", so a guest sees the whole menu — grouped by category — before
+  // they narrow it down.
+  const [activeCategoryId, setActiveCategoryId] = useState<string>(ALL_CATEGORY_ID);
   const [pinVerified, setPinVerified] = useState(noPin);
   const [showPinEntry, setShowPinEntry] = useState(false);
   const [cart, setCart] = useState<Map<string, number>>(new Map());
@@ -1580,13 +1589,27 @@ export function CustomerMenu({
 
   // ── Items shown ──
   const searchActive = query.trim().length > 0;
+  const showingAll = !searchActive && activeCategoryId === ALL_CATEGORY_ID;
+
   const visibleItems = useMemo(() => {
     if (searchActive) {
       const q = query.trim().toLowerCase();
       return items.filter((i) => i.name.toLowerCase().includes(q) || (i.description ?? "").toLowerCase().includes(q));
     }
+    if (activeCategoryId === ALL_CATEGORY_ID) return items;
     return items.filter((i) => i.category_id === activeCategoryId);
   }, [items, activeCategoryId, query, searchActive]);
+
+  // "All" keeps the category STRUCTURE rather than dumping every dish into one
+  // list — the guest still learns how the menu is organised. Built by walking
+  // `categories`, which arrives in the admin's order, so the sections inherit it
+  // for free; empty categories drop out rather than render a bare heading.
+  const groupedItems = useMemo(() => {
+    if (!showingAll) return [];
+    return categories
+      .map((c) => ({ category: c, items: items.filter((i) => i.category_id === c.id) }))
+      .filter((g) => g.items.length > 0);
+  }, [showingAll, categories, items]);
 
   const categoryCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -1820,9 +1843,13 @@ export function CustomerMenu({
         {!searchActive && categories.length > 0 && (
           <div className="sticky z-30 -mx-4 px-4 py-2.5 mt-4" style={{ top: showSearch ? 128 : 66, background: "linear-gradient(var(--color-canvas-soft) 70%, transparent)" }}>
             <div className="flex gap-2 overflow-x-auto rs-noscroll" style={{ WebkitOverflowScrolling: "touch" }}>
-              {categories.map((c) => {
-                const CatIcon = iconForCategory(c.name);
+              {/* "All" leads, then the admin's own order — the array is never sorted
+                  here, so whatever the admin arranges is what the guest sees. */}
+              {[{ id: ALL_CATEGORY_ID, name: "All" }, ...categories].map((c) => {
+                const isAll = c.id === ALL_CATEGORY_ID;
+                const CatIcon = isAll ? LayoutGrid : iconForCategory(c.name);
                 const active = activeCategoryId === c.id;
+                const count = isAll ? items.length : categoryCounts.get(c.id) ?? 0;
                 return (
                   <button
                     key={c.id}
@@ -1840,7 +1867,7 @@ export function CustomerMenu({
                     <CatIcon size={15} />
                     {c.name}
                     <span className="text-[11px] px-1.5 rounded-full" style={{ background: active ? "rgba(255,255,255,0.2)" : "var(--color-canvas-soft)", color: active ? "#fff" : "var(--color-ink-mute)" }}>
-                      {categoryCounts.get(c.id) ?? 0}
+                      {count}
                     </span>
                   </button>
                 );
@@ -1852,7 +1879,11 @@ export function CustomerMenu({
         {/* Section title */}
         <div className="flex items-center justify-between mt-4 mb-3">
           <h2 className="text-lg" style={{ color: "var(--color-ink)", fontWeight: 600, letterSpacing: "-0.3px" }}>
-            {searchActive ? `Results for "${query.trim()}"` : categories.find((c) => c.id === activeCategoryId)?.name ?? "Menu"}
+            {searchActive
+              ? `Results for "${query.trim()}"`
+              : showingAll
+              ? "Full menu"
+              : categories.find((c) => c.id === activeCategoryId)?.name ?? "Menu"}
           </h2>
           <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>{visibleItems.length} item{visibleItems.length !== 1 ? "s" : ""}</span>
         </div>
@@ -1864,6 +1895,50 @@ export function CustomerMenu({
             title={searchActive ? "No dishes found" : "Nothing here yet"}
             body={searchActive ? "Try a different search term or browse the categories." : "This category has no items right now."}
           />
+        ) : showingAll ? (
+          /* "All" — every dish, still grouped under its category heading, in the
+             admin's order. The `key` re-mounts on switch so the fade-in replays. */
+          <div key="all" className="flex flex-col gap-7">
+            {groupedItems.map(({ category, items: catItems }) => {
+              const CatIcon = iconForCategory(category.name);
+              return (
+                <section key={category.id}>
+                  <div className="flex items-center gap-2 mb-3">
+                    {/* `iconForCategory` returns a component that only takes `size`,
+                        so the colour is applied by the wrapper. */}
+                    <span className="flex items-center" style={{ color: "var(--color-ink-mute)" }}>
+                      <CatIcon size={16} />
+                    </span>
+                    <h3 className="text-base" style={{ color: "var(--color-ink)", fontWeight: 600, letterSpacing: "-0.2px" }}>
+                      {category.name}
+                    </h3>
+                    <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                      {catItems.length}
+                    </span>
+                    {/* A hairline that fills the row, so each group reads as its own
+                        block on a long scroll without shouting. */}
+                    <span className="flex-1 h-px ml-1" style={{ background: "var(--color-hairline)" }} />
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
+                    {catItems.map((item) => (
+                      <ItemCard
+                        key={item.id}
+                        item={item}
+                        // The heading above already names the category — repeating it
+                        // on every card would be noise.
+                        categoryName={null}
+                        cartQty={cart.get(item.id) ?? 0}
+                        canOrder={canOrderNow}
+                        onAdd={() => handleAdd(item)}
+                        onRemove={() => removeById(item.id)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
         ) : (
           <div key={searchActive ? "search" : activeCategoryId} className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
             {visibleItems.map((item) => (

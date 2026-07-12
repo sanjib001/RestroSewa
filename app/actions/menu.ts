@@ -118,7 +118,10 @@ export async function getMenuCategories(restaurantId: string): Promise<CategoryR
     .select(`id, name, description, is_active, sort_order, workstation_id, workstations ( name ), menu_items ( id )`)
     .eq("restaurant_id", restaurantId)
     .order("sort_order")
-    .order("name");
+    // Tiebreak on creation order, NOT name. A `name` tiebreak is what turned the
+    // whole menu alphabetical while every sort_order sat at 0 — with this, even a
+    // genuine tie falls back to the order the admin created them in.
+    .order("created_at");
 
   if (!data) return [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -150,12 +153,81 @@ export async function createCategory(
   if (!name || !workstationId) return { error: "Name and workstation are required." };
 
   const service = createServiceClient();
+
+  // Append to the END of the admin's order. Leaving `sort_order` at its default
+  // of 0 is what silently made every menu alphabetical (migration 20260712400000).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: last } = await (service as any)
+    .from("menu_categories")
+    .select("sort_order")
+    .eq("restaurant_id", restaurantId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const sortOrder = Number(last?.sort_order ?? 0) + 1;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any)
     .from("menu_categories")
-    .insert({ restaurant_id: restaurantId, name, workstation_id: workstationId });
+    .insert({ restaurant_id: restaurantId, name, workstation_id: workstationId, sort_order: sortOrder });
 
   if (error) return { error: error.message };
+  revalidatePath("/admin/menu");
+  revalidatePath("/employee/menu");
+  return null;
+}
+
+/**
+ * Move a category one place up or down in the admin's order.
+ *
+ * The swap happens in a single DB transaction (`swap_category_order`), so a
+ * reorder can never leave two categories sharing a position — and the customer
+ * menu, which reads the same `sort_order`, reflects it on the next load.
+ */
+export async function moveCategory(
+  id: string,
+  direction: "up" | "down"
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!hasPermission(ru, PERMISSIONS.MANAGE_MENU)) return { error: "Permission denied." };
+
+  const service = createServiceClient();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: me } = await (service as any)
+    .from("menu_categories")
+    .select("id, sort_order")
+    .eq("id", id)
+    .eq("restaurant_id", ru.restaurant_id)
+    .maybeSingle();
+
+  if (!me) return { error: "Category not found." };
+
+  // The neighbour is the nearest category on that side — not `sort_order ± 1`,
+  // which would break the moment positions aren't perfectly contiguous.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: neighbour } = await (service as any)
+    .from("menu_categories")
+    .select("id")
+    .eq("restaurant_id", ru.restaurant_id)
+    .filter("sort_order", direction === "up" ? "lt" : "gt", me.sort_order)
+    .order("sort_order", { ascending: direction !== "up" })
+    .limit(1)
+    .maybeSingle();
+
+  // Already first / last — a no-op, not an error.
+  if (!neighbour) return null;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any).rpc("swap_category_order", {
+    p_restaurant_id: ru.restaurant_id,
+    p_a: me.id,
+    p_b: neighbour.id,
+  });
+
+  if (error) return { error: "Could not reorder the category." };
+
   revalidatePath("/admin/menu");
   revalidatePath("/employee/menu");
   return null;
