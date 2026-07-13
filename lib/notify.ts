@@ -34,27 +34,10 @@ export async function emitTableActivationRequest(
   });
 }
 
-// Raises a customer-facing "order ready" alert through the same notification
-// system. Scoped to the session so only the guest who placed the order sees it
-// (the customer page polls notifications for its own session). One per order —
-// the caller dedups. Staff-facing reads exclude `order_ready`.
-export async function emitOrderReadyNotification(
-  service: ServiceClient,
-  params: {
-    restaurantId: string;
-    sessionId: string;
-    orderId: string;
-    tableId: string | null;
-    roomId: string | null;
-  }
-): Promise<void> {
-  await service.from("notifications").insert({
-    restaurant_id: params.restaurantId,
-    table_id: params.tableId,
-    room_id: params.roomId,
-    session_id: params.sessionId,
-    order_id: params.orderId,
-    type: "order_ready",
-    status: "new",
-  });
-}
+// `emitOrderReadyNotification` used to live here. It fired when every item on an
+// order turned `ready`, telling the guest their food was on its way.
+//
+// The `ready` state has been removed from the system — an item is now either
+// pending or served — so there is no moment left at which to raise it. The 49
+// historical `order_ready` rows stay in the table as history; nothing writes a
+// new one, and the staff panel already filtered them out.

@@ -22,7 +22,7 @@ import {
   getCustomerActivationState,
   getCustomerOrderFeed,
   getCustomerNotifState,
-  acknowledgeCustomerReady,
+
 } from "@/app/actions/customer";
 import type {
   CustomerCartItem,
@@ -92,7 +92,6 @@ const ORDER_STATUS_META: Record<
   { label: string; color: string; bg: string; Icon: React.ComponentType<{ size?: number }> }
 > = {
   pending: { label: "Preparing", color: "#b45309", bg: "#fff7ed", Icon: ChefHat },
-  ready:   { label: "Ready",     color: "#0d9488", bg: "#ecfdf5", Icon: CheckCircle2 },
   served:  { label: "Served",    color: "#64748b", bg: "#f1f5f9", Icon: Receipt },
 };
 
@@ -509,16 +508,18 @@ function ToastStack({ toasts, onOpen, onClose }: { toasts: Toast[]; onOpen: (t: 
 
 // ─── Order timeline + orders sheet ───────────────────────────────────────────────
 
+// Three steps, not four. The "Ready" rung was removed with the state behind it —
+// a guest was being shown a milestone the kitchen no longer records, which would
+// have left every order stuck on "Preparing" forever.
 const TIMELINE = [
   { key: "placed",  label: "Order received", Icon: ClipboardList },
   { key: "pending", label: "Preparing",      Icon: ChefHat },
-  { key: "ready",   label: "Ready",          Icon: CheckCircle2 },
   { key: "served",  label: "Served",         Icon: Receipt },
 ] as const;
 
 function OrderTimeline({ status }: { status: CustomerOrderStatus }) {
-  const activeIndex = status === "served" ? 3 : status === "ready" ? 2 : 1; // "placed" always done
-  const accent = status === "ready" || status === "served" ? "#0d9488" : "#b45309";
+  const activeIndex = status === "served" ? 2 : 1; // "placed" is always done
+  const accent = status === "served" ? "#0d9488" : "#b45309";
   return (
     <div className="flex flex-col gap-0 mt-3">
       {TIMELINE.map((step, i) => {
@@ -1409,7 +1410,6 @@ export function CustomerMenu({
   // Live tracking + alerts
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const seenReadyRef = useRef<Set<string>>(new Set());
   // Set by the polling effect below; called by the realtime stream.
   const pollRef = useRef<null | (() => void)>(null);
 
@@ -1507,15 +1507,6 @@ export function CustomerMenu({
           const feed = await getCustomerOrderFeed(activeSessionId);
           if (!active) return;
           setOrders(feed.orders);
-
-          // "Order ready" surfaces in a single place — the Alerts bell (badge +
-          // ringing + notification-center entry). No toast/header duplication.
-          // We still acknowledge server-side so the alert doesn't accumulate.
-          const fresh = feed.ready.filter((r) => !seenReadyRef.current.has(r.id));
-          if (fresh.length > 0) {
-            fresh.forEach((r) => seenReadyRef.current.add(r.id));
-            acknowledgeCustomerReady(activeSessionId, fresh.map((r) => r.id)).catch(() => {});
-          }
         } else if (noPin && activationRef.current !== "approved") {
           setOrders([]);
         }
@@ -1748,10 +1739,10 @@ export function CustomerMenu({
       const body = `${o.items.reduce((n, i) => n + i.quantity, 0)} item${o.items.length !== 1 ? "s" : ""} · ${rupee(o.total)}`;
       list.push({
         id: `order-${o.id}`,
-        title: o.status === "ready" ? "Order ready to serve" : o.status === "served" ? "Order served" : "Order in the kitchen",
+        title: o.status === "served" ? "Order served" : "Order in the kitchen",
         body,
         time,
-        tone: o.status === "ready" ? "success" : o.status === "served" ? "neutral" : "warning",
+        tone: o.status === "served" ? "neutral" : "warning",
         Icon: meta.Icon,
       });
     }
@@ -1778,10 +1769,12 @@ export function CustomerMenu({
     return list;
   }, [orders, serviceNotif, isRoom]);
 
-  const readyCount = orders.filter((o) => o.status === "ready").length;
   const activeOrderCount = orders.filter((o) => o.status !== "served").length;
   const pendingServiceCount = (serviceNotif.call_waiter === "new" ? 1 : 0) + (serviceNotif.request_bill === "new" ? 1 : 0);
-  const alertCount = readyCount + pendingServiceCount;
+  // The alert badge used to count "your order is ready" events. With that state
+  // gone, the only thing left worth badging is a service request the guest raised
+  // and staff haven't answered yet.
+  const alertCount = pendingServiceCount;
 
   // ── Items shown ──
   const searchActive = query.trim().length > 0;

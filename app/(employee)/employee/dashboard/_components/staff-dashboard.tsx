@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ListOrdered, Banknote, LayoutGrid, BookOpen, ChevronDown, HandCoins } from "lucide-react";
+import { ListOrdered, Banknote, LayoutGrid, BedDouble, BookOpen, ChevronDown, HandCoins } from "lucide-react";
 
-export type SectionKey = "orders" | "sales" | "credits" | "tables" | "menu";
+export type SectionKey = "orders" | "tables" | "rooms" | "sales" | "credits" | "menu";
 
 export type DashboardSection = {
   key: SectionKey;
@@ -17,11 +17,45 @@ export type DashboardSection = {
 
 const SECTION_ICON: Record<SectionKey, React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
   orders: ListOrdered,
+  tables: LayoutGrid,
+  rooms: BedDouble,
   sales: Banknote,
   credits: HandCoins,
-  tables: LayoutGrid,
   menu: BookOpen,
 };
+
+/**
+ * What a section shows while its data is still in flight.
+ *
+ * Each section streams in on its own now, so the page has to look deliberate
+ * while they land rather than jumping as each one arrives. Fixed heights, so the
+ * layout doesn't reflow underneath a cashier who has already started reading.
+ */
+export function SectionSkeleton({ bare }: { bare?: boolean }) {
+  const bars = (
+    <div className="flex flex-col gap-2.5" aria-hidden>
+      {[100, 72, 88].map((w, i) => (
+        <div
+          key={i}
+          className="rounded-lg animate-pulse"
+          style={{ height: 14, width: `${w}%`, background: "var(--color-canvas-soft)" }}
+        />
+      ))}
+    </div>
+  );
+
+  if (bare) {
+    return (
+      <div
+        className="rounded-2xl border px-4 sm:px-5 py-4"
+        style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+      >
+        {bars}
+      </div>
+    );
+  }
+  return <div className="py-2">{bars}</div>;
+}
 
 function SectionCard({ section, className }: { section: DashboardSection; className?: string }) {
   // Collapsible so a tall section (Menu, Sales) doesn't bury the ones below it.

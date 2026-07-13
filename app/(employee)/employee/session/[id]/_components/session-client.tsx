@@ -13,139 +13,11 @@ import type { CreditCustomer } from "@/app/actions/credits";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Check, ChevronRight, Plus, X } from "lucide-react";
+import { Check, ChevronRight, Plus, Receipt, X } from "lucide-react";
+import { OrderItem } from "@/app/(employee)/employee/_components/order-item";
 import { SessionPrintButtons } from "./print-tickets";
 import type { RestaurantInfo } from "./print-tickets";
 
-const STATUS_LABEL: Record<string, string> = {
-  pending: "Pending",
-  ready: "Ready",
-  served: "Served",
-};
-
-const STATUS_COLOR: Record<string, string> = {
-  pending: "#f97316",
-  ready: "#1a7a4a",
-  served: "var(--color-ink-mute)",
-};
-
-function OrderItem({
-  item,
-  sessionId,
-  canCancel = false,
-}: {
-  item: OrderItemRow;
-  sessionId: string;
-  canCancel?: boolean;
-}) {
-  const [, start] = useTransition();
-  const [cancelError, setCancelError] = useState<string | null>(null);
-
-  const nextStatus =
-    item.item_status === "pending"
-      ? "ready"
-      : item.item_status === "ready"
-      ? "served"
-      : null;
-
-  // A served item was genuinely consumed — its stock stays deducted, so it can
-  // never be cancelled. Only what is still pending or ready can go back.
-  const cancellable = canCancel && item.item_status !== "served";
-
-  return (
-    <div
-      className="flex items-center gap-3 px-4 py-3 border-b last:border-0"
-      style={{
-        borderColor: "var(--color-hairline)",
-        opacity: item.item_status === "served" ? 0.45 : 1,
-      }}
-    >
-      <div className="flex-1">
-        <p className="text-sm" style={{ color: "var(--color-ink)" }}>
-          {item.quantity > 1 && (
-            <span className="font-medium mr-1" style={{ color: "var(--color-ink-mute)" }}>
-              ×{item.quantity}
-            </span>
-          )}
-          {item.item_name}
-        </p>
-        {item.workstation_name && (
-          <p className="text-xs mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
-            {item.workstation_name}
-          </p>
-        )}
-        {item.notes && (
-          <p className="text-xs italic mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
-            {item.notes}
-          </p>
-        )}
-      </div>
-
-      <p className="text-sm tabular shrink-0" style={{ color: "var(--color-ink-mute)" }}>
-        ₹{(Number(item.item_price) * item.quantity).toFixed(0)}
-      </p>
-
-      <span
-        className="text-xs shrink-0 min-w-[52px] text-center"
-        style={{ color: STATUS_COLOR[item.item_status] }}
-      >
-        {STATUS_LABEL[item.item_status]}
-      </span>
-
-      {nextStatus && (
-        <button
-          type="button"
-          title={`Mark as ${nextStatus}`}
-          className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
-          style={{ background: "var(--color-canvas-soft)" }}
-          onClick={() =>
-            start(async () => {
-              await updateOrderItemStatus(
-                item.id,
-                nextStatus as "ready" | "served"
-              );
-            })
-          }
-        >
-          <Check size={13} style={{ color: "var(--color-ink-mute)" }} />
-        </button>
-      )}
-
-      {/* Cancelling takes the item off the bill AND puts its stock back on the
-          shelf, so it is confirmed rather than one-tap. */}
-      {cancellable && (
-        <button
-          type="button"
-          title="Cancel this item"
-          aria-label={`Cancel ${item.item_name}`}
-          className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
-          style={{ background: "var(--color-canvas-soft)" }}
-          onClick={() => {
-            if (
-              !confirm(
-                `Cancel ${item.quantity > 1 ? `${item.quantity} × ` : ""}${item.item_name}?\n\nIt comes off the bill and its stock goes back.`
-              )
-            )
-              return;
-            setCancelError(null);
-            start(async () => {
-              const res = await cancelOrderItem(item.id);
-              if (res?.error) setCancelError(res.error);
-            });
-          }}
-        >
-          <X size={13} style={{ color: "#dc2626" }} />
-        </button>
-      )}
-
-      {cancelError && (
-        <span className="text-xs shrink-0" style={{ color: "#dc2626" }}>
-          {cancelError}
-        </span>
-      )}
-    </div>
-  );
-}
 
 type PaymentMethod = "cash" | "online" | "card" | "mixed" | "credit";
 type DownTender = "cash" | "online" | "card";
@@ -808,7 +680,6 @@ export function SessionClient({
             <OrderItem
               key={i.id}
               item={i}
-              sessionId={session.id}
               canCancel={canCancelOrders && !isClosed}
             />
           ))}
@@ -817,7 +688,7 @@ export function SessionClient({
               <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Served</p>
             </div>
           )}
-          {servedItems.map((i) => <OrderItem key={i.id} item={i} sessionId={session.id} />)}
+          {servedItems.map((i) => <OrderItem key={i.id} item={i} />)}
           {/* Total */}
           <div
             className="flex justify-between px-4 py-3 border-t"
@@ -855,6 +726,11 @@ export function SessionClient({
             />
           )}
 
+          {/* This screen is for TABLES and walk-ins only now. A room stay is
+              redirected to its own screen before it ever gets here, so there is no
+              room branch to handle: the room's orders, KOT and folio all live in
+              one place. `closeSessionWithPayment` still refuses a room stay
+              server-side, in case anyone posts to it directly. */}
           {canCloseBills && <PaymentForm session={session} canUseCredit={canUseCredit} />}
 
           {!canCreateOrders && !canCloseBills && (

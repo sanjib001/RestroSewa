@@ -6,7 +6,6 @@ import { redirect } from "next/navigation";
 import { hasPermission, PERMISSIONS, NAV_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { buildVisibilityFilter, getAssignedWorkstationIds } from "@/lib/assignments";
-import { emitOrderReadyNotification } from "@/lib/notify";
 import { computeCreditStats, settlementOf } from "@/lib/credits";
 import type { BillSettlement, CreditStats } from "@/lib/credits";
 import { resolveOrderItems } from "@/lib/order-items";
@@ -29,7 +28,7 @@ export type OrderItemRow = {
   item_price: number;
   workstation_name: string | null;
   quantity: number;
-  item_status: "pending" | "ready" | "served";
+  item_status: "pending" | "served";
   notes: string | null;
   created_at: string;
   order_id: string;
@@ -41,6 +40,13 @@ export type SessionDetail = {
   status: string;
   table_id: string | null;
   room_id: string | null;
+  /**
+   * Set when this session belongs to a hotel STAY. The bill is then the guest's
+   * folio — room nights + extras + this food — so it must NOT be settled through
+   * the ordinary close-bill path, which would charge for the food alone and leave
+   * the guest checked in with the room still occupied.
+   */
+  room_stay_id: string | null;
   table_number: string | null;
   room_number: string | null;
   opened_at: string;
@@ -61,6 +67,24 @@ export type CartItem = {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * The tables this staff member may work, with their live session state.
+ *
+ * Exists so the dashboard's Tables section can refetch ITSELF when a table
+ * changes, instead of calling `router.refresh()`. A refresh re-runs the whole
+ * route — Sales, Credits, the Menu, every one of their queries — and then throws
+ * the results away, because those sections are client components holding their
+ * own state. On a busy service that was a full dashboard re-render per order.
+ */
+export async function getMyTables(): Promise<TableStatus[]> {
+  const ru = await getRestaurantUser();
+  const [tables, visibility] = await Promise.all([
+    getTableStatusOverview(ru.restaurant_id),
+    buildVisibilityFilter(ru.restaurant_id, ru),
+  ]);
+  return tables.filter((t) => visibility.canSeeTable(t.id));
+}
 
 // ─── Table Status Overview ────────────────────────────────────────────────────
 
@@ -172,45 +196,11 @@ async function pinForNewSession(
     : null;
 }
 
-export async function openRoomSession(roomId: string) {
-  const ru = await getRestaurantUser();
-  const service = createServiceClient();
-
-  // Isolation: staff may only open rooms in their assigned room types/rooms.
-  const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
-  if (!visibility.seesAll && !visibility.canSeeRoom(roomId)) {
-    redirect("/employee/dashboard");
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: existing } = await (service as any)
-    .from("sessions")
-    .select("id")
-    .eq("restaurant_id", ru.restaurant_id)
-    .eq("room_id", roomId)
-    .eq("status", "active")
-    .maybeSingle();
-
-  if (existing) {
-    redirect(`/employee/session/${existing.id}`);
-  }
-
-  const customer_pin = await pinForNewSession(service, ru.restaurant_id);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: session, error } = await (service as any)
-    .from("sessions")
-    .insert({
-      restaurant_id: ru.restaurant_id,
-      type: "room_service",
-      room_id: roomId,
-      customer_pin,
-    })
-    .select("id")
-    .single();
-
-  if (error) redirect("/employee/dashboard");
-  redirect(`/employee/session/${session.id}`);
-}
+// `openRoomSession` used to live here: it opened a session on a room with no
+// stay behind it, which is precisely the bug — the guest got billed for their
+// room service and never for the room. A room session is now only ever created
+// by `checkInRoom`, which opens the stay and the session together. Removed
+// rather than deprecated, so there is no second way to make a stay-less session.
 
 export async function openWalkInSession() {
   const ru = await getRestaurantUser();
@@ -343,7 +333,7 @@ export async function getSessionDetail(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: session } = await (service as any)
     .from("sessions")
-    .select(`id, type, status, opened_at, customer_pin, table_id, room_id, restaurant_tables ( number ), rooms ( number )`)
+    .select(`id, type, status, opened_at, customer_pin, table_id, room_id, room_stay_id, restaurant_tables ( number ), rooms ( number )`)
     .eq("id", sessionId)
     .maybeSingle();
 
@@ -386,6 +376,8 @@ export async function getSessionDetail(
     table_id: (session as any).table_id ?? null,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     room_id: (session as any).room_id ?? null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    room_stay_id: (session as any).room_stay_id ?? null,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     table_number: (session as any).restaurant_tables?.number ?? null,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -460,7 +452,7 @@ export async function submitOrder(
 
 export async function updateOrderItemStatus(
   itemId: string,
-  status: "pending" | "ready" | "served"
+  status: "pending" | "served"
 ): Promise<ActionResult> {
   const ru = await getRestaurantUser();
 
@@ -508,57 +500,19 @@ export async function updateOrderItemStatus(
     }
   }
 
+  // One state change, one write. An item is pending until it reaches the guest,
+  // and then it is served.
+  //
+  // This used to also fan out: when the last item on an order turned `ready` it
+  // re-read every item on the order, checked for an existing alert, re-read the
+  // session, and raised an `order_ready` notification — four extra round-trips on
+  // the hot path of a kitchen tapping through a rush. With `ready` gone there is
+  // no moment left to announce, and the whole block goes with it.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (service as any)
     .from("session_order_items")
     .update({ item_status: status })
     .eq("id", itemId);
-
-  // Tell the customer their food is ready — but only once the *whole* order is
-  // ready (every item ready or served). A single item flipping in a multi-item
-  // order shouldn't fire the alert. Reuses the notification system, scoped to
-  // the session so only that guest is notified.
-  if (status === "ready") {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: orderItems } = await (service as any)
-      .from("session_order_items")
-      .select("item_status")
-      .eq("order_id", item.order_id);
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const all = (orderItems ?? []) as { item_status: string }[];
-    const fullyReady =
-      all.length > 0 &&
-      all.every((it) => it.item_status === "ready" || it.item_status === "served") &&
-      all.some((it) => it.item_status === "ready");
-
-    if (fullyReady) {
-      // Dedup: don't re-alert if this order already has an order_ready event.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: existing } = await (service as any)
-        .from("notifications")
-        .select("id")
-        .eq("order_id", item.order_id)
-        .eq("type", "order_ready")
-        .maybeSingle();
-
-      if (!existing) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: session } = await (service as any)
-          .from("sessions")
-          .select("table_id, room_id")
-          .eq("id", order.session_id)
-          .maybeSingle();
-        await emitOrderReadyNotification(service, {
-          restaurantId: ru.restaurant_id,
-          sessionId: order.session_id,
-          orderId: item.order_id,
-          tableId: session?.table_id ?? null,
-          roomId: session?.room_id ?? null,
-        });
-      }
-    }
-  }
 
   revalidatePath("/employee/queue");
   revalidatePath(`/employee/session/${order.session_id}`);
@@ -591,6 +545,23 @@ export async function closeSessionWithPayment(
   if (isNaN(totalAmount) || totalAmount < 0) return { error: "Invalid total amount." };
   if (cashAmount < 0 || onlineAmount < 0 || cardAmount < 0) {
     return { error: "Amounts cannot be negative." };
+  }
+
+  // A hotel stay is NOT billable here. This path charges the session's food and
+  // closes it; for a stay that would collect the room service, skip the room
+  // nights entirely, and leave the guest checked in with the room still occupied.
+  // It has to be refused server-side and not merely hidden in the UI, because the
+  // form is a POST endpoint that anyone can reach directly.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: sess } = await (service as any)
+    .from("sessions")
+    .select("room_stay_id")
+    .eq("id", sessionId)
+    .eq("restaurant_id", ru.restaurant_id)
+    .maybeSingle();
+
+  if (sess?.room_stay_id) {
+    return { error: "This is a room stay — settle it from the guest's folio, so the room nights are billed too." };
   }
 
   if (method === "mixed") {
@@ -913,7 +884,7 @@ export type QueueOrderItem = {
   id: string;
   item_name: string;
   quantity: number;
-  item_status: "pending" | "ready" | "served";
+  item_status: "pending" | "served";
   notes: string | null;
   workstation_name: string | null;
   item_price: number;
@@ -929,7 +900,7 @@ export type QueueOrder = {
   customer_phone: string | null;
   created_at: string;
   items: QueueOrderItem[];
-  status: "pending" | "ready" | "served";
+  status: "pending" | "served";
   total: number;
 };
 
@@ -994,7 +965,7 @@ export async function getMyOrderQueue(): Promise<QueueOrder[]> {
     ...new Set(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ((items ?? []) as any[])
-        .filter((it) => it.item_status === "pending" || it.item_status === "ready")
+        .filter((it) => it.item_status === "pending")
         .map((it) => it.order_id)
     ),
   ];
@@ -1028,7 +999,7 @@ export async function getMyOrderQueue(): Promise<QueueOrder[]> {
         (it) => it.workstation_id && myWorkstations.has(it.workstation_id)
       );
       // Only surface the order if it still has actionable work for them.
-      if (!rawItems.some((it) => it.item_status === "pending" || it.item_status === "ready")) {
+      if (!rawItems.some((it) => it.item_status === "pending")) {
         continue;
       }
     } else {
@@ -1051,9 +1022,11 @@ export async function getMyOrderQueue(): Promise<QueueOrder[]> {
       item_price: Number(it.item_price),
     }));
 
-    const anyPending = orderItems.some((i) => i.item_status === "pending");
-    const anyReady = orderItems.some((i) => i.item_status === "ready");
-    const status: QueueOrder["status"] = anyPending ? "pending" : anyReady ? "ready" : "served";
+    // An order is pending while anything on it still is; once every item has gone
+    // out, the order is served. There is no middle any more.
+    const status: QueueOrder["status"] = orderItems.some((i) => i.item_status === "pending")
+      ? "pending"
+      : "served";
 
     result.push({
       order_id: orderId,

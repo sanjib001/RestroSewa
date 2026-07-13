@@ -1,8 +1,13 @@
-import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
 import { redirect } from "next/navigation";
 import { hasPermission } from "@/lib/permissions";
 import type { Permission } from "@/lib/permissions";
+import { getAuthUser, getStaffRow, isSuperAdmin } from "@/lib/auth/current-user";
+
+// Every guard resolves the caller through the request-memoised helpers in
+// current-user.ts. The checks themselves are unchanged — same auth, same role,
+// same permission, same redirects. What changed is that a page calling four
+// guarded things no longer makes four HTTP auth round-trips to Supabase and four
+// identical staff-row lookups. It makes one of each.
 
 export type RestaurantUserContext = {
   id: string;
@@ -13,77 +18,28 @@ export type RestaurantUserContext = {
 };
 
 export async function requireSuperAdmin() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+  const user = await getAuthUser();
   if (!user) redirect("/superadmin/login");
 
-  const service = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: sa } = await (service as any)
-    .from("super_admins")
-    .select("id")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
-
-  if (!sa) redirect("/superadmin/login");
+  if (!(await isSuperAdmin(user.id))) redirect("/superadmin/login");
 
   return user;
 }
 
 export async function requireRestaurantStaff() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
-  const service = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: ru } = await (service as any)
-    .from("restaurant_users")
-    .select("id, restaurant_id, role, display_name, permissions")
-    .eq("auth_user_id", user.id)
-    .eq("is_active", true)
-    .is("deleted_at", null)
-    .maybeSingle();
+  const restaurantUser = await getStaffRow(user.id);
+  if (!restaurantUser) redirect("/login");
 
-  if (!ru) redirect("/login");
-
-  const restaurantUser = ru as RestaurantUserContext;
-  // Normalise: permissions column may be null if row predates migration
-  if (!Array.isArray(restaurantUser.permissions)) restaurantUser.permissions = [];
-
-  return { user, restaurantUser };
+  return { user, restaurantUser: restaurantUser as RestaurantUserContext };
 }
 
-// Accepts restaurant_admin (always passes) OR restaurant_employee with the given permission.
-// Redirects to /employee/dashboard if authenticated but lacks permission.
+// Accepts restaurant_admin (always passes) OR restaurant_employee with the given
+// permission. Redirects to /employee/dashboard if authenticated but lacking it.
 export async function requireAdminOrPermission(permission: Permission) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) redirect("/login");
-
-  const service = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: ru } = await (service as any)
-    .from("restaurant_users")
-    .select("id, restaurant_id, role, display_name, permissions")
-    .eq("auth_user_id", user.id)
-    .eq("is_active", true)
-    .is("deleted_at", null)
-    .maybeSingle();
-
-  if (!ru) redirect("/login");
-
-  const restaurantUser = ru as RestaurantUserContext;
-  if (!Array.isArray(restaurantUser.permissions)) restaurantUser.permissions = [];
+  const { user, restaurantUser } = await requireRestaurantStaff();
 
   if (!hasPermission(restaurantUser, permission)) {
     redirect("/employee/dashboard");
@@ -93,28 +49,13 @@ export async function requireAdminOrPermission(permission: Permission) {
 }
 
 export async function requireRestaurantAdmin() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user, restaurantUser } = await requireRestaurantStaff();
 
-  if (!user) redirect("/login");
-
-  const service = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: ru } = await (service as any)
-    .from("restaurant_users")
-    .select("id, restaurant_id, role, display_name, permissions")
-    .eq("auth_user_id", user.id)
-    .eq("role", "restaurant_admin")
-    .eq("is_active", true)
-    .is("deleted_at", null)
-    .maybeSingle();
-
-  if (!ru) redirect("/login");
-
-  const restaurantUser = ru as RestaurantUserContext;
-  if (!Array.isArray(restaurantUser.permissions)) restaurantUser.permissions = [];
+  // The role filter used to be a `.eq("role", …)` in the SQL. Checking it here
+  // instead lets the row come from the shared per-request cache, and rejects
+  // exactly the same people: a non-admin found no row before, and fails this
+  // check now. Both land on /login.
+  if (restaurantUser.role !== "restaurant_admin") redirect("/login");
 
   return { user, restaurantUser };
 }

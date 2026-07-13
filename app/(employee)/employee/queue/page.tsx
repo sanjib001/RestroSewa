@@ -16,7 +16,6 @@ export default async function OrdersPage() {
   const orders = await getMyOrderQueue();
 
   const pending = orders.filter((o) => o.status === "pending").length;
-  const ready = orders.filter((o) => o.status === "ready").length;
 
   return (
     <div className="p-4 sm:p-5 max-w-2xl mx-auto">
@@ -29,7 +28,7 @@ export default async function OrdersPage() {
       <p className="text-sm mb-6" style={{ color: "var(--color-ink-mute)" }}>
         {orders.length === 0
           ? "All clear."
-          : `${pending} pending · ${ready} ready · updates live`}
+          : `${pending} pending · updates live`}
       </p>
 
       <OrdersQueue initialOrders={orders} canManage={canManage} />

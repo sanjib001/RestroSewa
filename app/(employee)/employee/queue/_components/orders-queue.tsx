@@ -11,7 +11,6 @@ const FALLBACK_POLL_MS = 60_000;
 
 const STATUS_META: Record<QueueOrder["status"], { label: string; color: string; bg: string }> = {
   pending: { label: "Pending", color: "#f97316", bg: "#fff7ed" },
-  ready: { label: "Ready", color: "#1a7a4a", bg: "#f0fdf4" },
   served: { label: "Served", color: "var(--color-ink-mute)", bg: "var(--color-canvas-soft)" },
 };
 
@@ -38,10 +37,12 @@ function ItemRow({
 }: {
   item: QueueOrderItem;
   canManage: boolean;
-  onUpdate: (id: string, status: "ready" | "served") => void;
+  onUpdate: (id: string, status: "served") => void;
   busy: boolean;
 }) {
-  const next = item.item_status === "pending" ? "ready" : item.item_status === "ready" ? "served" : null;
+  // One tap. There is no middle state to advance through any more: an item is
+  // pending until it reaches the guest, and then it is served.
+  const next = item.item_status === "pending" ? "served" : null;
   const meta = STATUS_META[item.item_status];
 
   return (
@@ -71,12 +72,9 @@ function ItemRow({
           disabled={busy}
           onClick={() => onUpdate(item.id, next)}
           className="text-xs px-3 py-1.5 rounded-lg font-medium shrink-0 disabled:opacity-50"
-          style={{
-            background: next === "ready" ? "#f97316" : "#1a7a4a",
-            color: "#fff",
-          }}
+          style={{ background: "#1a7a4a", color: "#fff" }}
         >
-          {next === "ready" ? "Mark ready" : "Served"}
+          Served
         </button>
       ) : (
         <span className="w-[76px] shrink-0" />
@@ -93,7 +91,7 @@ function OrderCard({
 }: {
   order: QueueOrder;
   canManage: boolean;
-  onUpdate: (id: string, status: "ready" | "served") => void;
+  onUpdate: (id: string, status: "served") => void;
   busyItems: Set<string>;
 }) {
   const meta = STATUS_META[order.status];
@@ -133,7 +131,7 @@ function OrderCard({
   );
 }
 
-export type OrdersStats = { total: number; pending: number; ready: number };
+export type OrdersStats = { total: number; pending: number };
 
 export function OrdersQueue({
   initialOrders,
@@ -174,7 +172,7 @@ export function OrdersQueue({
     };
   }, [refresh]);
 
-  const handleUpdate = useCallback((id: string, status: "ready" | "served") => {
+  const handleUpdate = useCallback((id: string, status: "served") => {
     setBusyItems((prev) => new Set(prev).add(id));
     // Optimistic update
     setOrders((prev) =>
@@ -199,13 +197,14 @@ export function OrdersQueue({
     });
   }, [refresh]);
 
-  const pendingOrders = orders.filter((o) => o.status === "pending");
-  const readyOrders = orders.filter((o) => o.status === "ready");
+  // The queue only ever holds orders that still have a pending item — an order
+  // whose items have all gone out drops off it — so every order here is pending.
+  const pendingOrders = orders;
 
   // Report live counts upward (dashboard uses this to auto-collapse when empty).
   useEffect(() => {
-    onStats?.({ total: orders.length, pending: pendingOrders.length, ready: readyOrders.length });
-  }, [orders.length, pendingOrders.length, readyOrders.length, onStats]);
+    onStats?.({ total: orders.length, pending: pendingOrders.length });
+  }, [orders.length, pendingOrders.length, onStats]);
 
   if (orders.length === 0) {
     return (
@@ -218,21 +217,11 @@ export function OrdersQueue({
     );
   }
 
+  // Pending first. It used to be "Ready to serve" on top, because that was the
+  // list somebody had to act on; with `ready` gone, the outstanding work IS the
+  // pending list, so it takes the top slot.
   return (
     <div className="flex flex-col gap-6">
-      {readyOrders.length > 0 && (
-        <section>
-          <p className="text-xs uppercase tracking-wide mb-2 font-medium" style={{ color: "#1a7a4a", letterSpacing: "0.06em" }}>
-            Ready to serve
-          </p>
-          <div className="flex flex-col gap-3">
-            {readyOrders.map((o) => (
-              <OrderCard key={o.order_id} order={o} canManage={canManage} onUpdate={handleUpdate} busyItems={busyItems} />
-            ))}
-          </div>
-        </section>
-      )}
-
       {pendingOrders.length > 0 && (
         <section>
           <p className="text-xs uppercase tracking-wide mb-2 font-medium" style={{ color: "#f97316", letterSpacing: "0.06em" }}>

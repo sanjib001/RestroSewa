@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getSessionDetail } from "@/app/actions/pos";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
@@ -41,6 +41,15 @@ export default async function SessionPage({
     visibility.seesAll ||
     (visibility.canSeeTable(session.table_id) && visibility.canSeeRoom(session.room_id));
   if (!canView) notFound();
+
+  // A room stay has ONE screen, and this isn't it. Any link that still points
+  // here — an old bookmark, the Orders queue, a redirect after adding an item —
+  // lands on the room screen, where the orders, the KOT and the full folio all
+  // live. Redirecting rather than rendering is what stops the two screens
+  // drifting back apart.
+  if (session.room_stay_id) {
+    redirect(`/employee/room/${session.room_stay_id}`);
+  }
 
   const canCreateOrders = hasPermission(restaurantUser, PERMISSIONS.CREATE_ORDERS);
   const canCloseBills   = hasPermission(restaurantUser, PERMISSIONS.CLOSE_BILLS);

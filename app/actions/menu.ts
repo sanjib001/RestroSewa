@@ -296,6 +296,29 @@ export async function deleteCategory(id: string): Promise<ActionResult> {
 
 // ─── Menu Items ───────────────────────────────────────────────────────────────
 
+/**
+ * Every item on the menu, in one query.
+ *
+ * The staff dashboard used to fetch the categories and then call
+ * `getMenuItemsByCategory` once PER CATEGORY — 25 categories, 25 round-trips,
+ * all to build a list it then flattened back into one array anyway. This is the
+ * same result in a single trip, ordered the same way.
+ */
+export async function getAllMenuItems(restaurantId: string): Promise<MenuItemRow[]> {
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("menu_items")
+    .select(ITEM_COLUMNS)
+    .eq("restaurant_id", restaurantId)
+    .eq("is_deleted", false)
+    .order("sort_order")
+    .order("name");
+
+  if (!data) return [];
+  return (data as Record<string, unknown>[]).map(normalizeItem);
+}
+
 export async function getMenuItemsByCategory(
   restaurantId: string,
   categoryId: string

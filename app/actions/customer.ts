@@ -10,10 +10,10 @@ export type CustomerOrderItem = {
   name: string;
   quantity: number;
   price: number;
-  status: "pending" | "ready" | "served";
+  status: "pending" | "served";
 };
 
-export type CustomerOrderStatus = "pending" | "ready" | "served";
+export type CustomerOrderStatus = "pending" | "served";
 
 export type CustomerOrder = {
   id: string;
@@ -25,9 +25,6 @@ export type CustomerOrder = {
 
 export type CustomerOrderFeed = {
   orders: CustomerOrder[];
-  // order_ready notifications (status "new") for this session — used to fire a
-  // one-time "your order is ready" toast, then acknowledged by the client.
-  ready: { id: string; order_id: string | null }[];
 };
 
 // A guest's cart is a REQUEST, not a price list. It says which dish, which
@@ -504,14 +501,17 @@ export async function sendNotification(
   return {};
 }
 
-// Live feed for the customer page: the session's own orders (with per-item
-// status) plus any unseen "order ready" alerts. Scoped strictly to the session,
-// so a guest only ever sees their own order — never another table's. Polled by
-// the customer page; no realtime infra required.
+// Live feed for the customer page: the session's own orders, with per-item
+// status. Scoped strictly to the session, so a guest only ever sees their own
+// order — never another table's. Polled by the customer page.
+//
+// It used to also carry unseen `order_ready` alerts, for a one-time "your food is
+// ready" toast. The `ready` state no longer exists, so there is nothing to
+// announce and nothing to acknowledge.
 export async function getCustomerOrderFeed(
   sessionId: string | null
 ): Promise<CustomerOrderFeed> {
-  if (!sessionId) return { orders: [], ready: [] };
+  if (!sessionId) return { orders: [] };
 
   const service = createServiceClient();
 
@@ -539,13 +539,10 @@ export async function getCustomerOrderFeed(
         status: it.item_status,
       }));
 
-    // Order-level status derived from its items:
-    //   all served → served · all ready/served → ready · otherwise pending.
-    let status: CustomerOrderStatus = "pending";
-    if (items.length > 0) {
-      if (items.every((i) => i.status === "served")) status = "served";
-      else if (items.every((i) => i.status === "ready" || i.status === "served")) status = "ready";
-    }
+    // Order-level status derived from its items: served once every item has gone
+    // out, pending until then.
+    const status: CustomerOrderStatus =
+      items.length > 0 && items.every((i) => i.status === "served") ? "served" : "pending";
 
     const total = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
     return { id: o.id, created_at: o.created_at, status, total, items };
@@ -553,35 +550,5 @@ export async function getCustomerOrderFeed(
   // Only surface orders that still have items (defensive).
   .filter((o) => o.items.length > 0);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: readyRows } = await (service as any)
-    .from("notifications")
-    .select("id, order_id")
-    .eq("session_id", sessionId)
-    .eq("type", "order_ready")
-    .eq("status", "new");
-
-  const ready = ((readyRows ?? []) as { id: string; order_id: string | null }[]).map((r) => ({
-    id: r.id,
-    order_id: r.order_id,
-  }));
-
-  return { orders, ready };
-}
-
-// Acknowledges "order ready" alerts once the customer has been shown the toast,
-// so the same alert doesn't fire again on the next poll. Session-scoped.
-export async function acknowledgeCustomerReady(
-  sessionId: string,
-  ids: string[]
-): Promise<void> {
-  if (!sessionId || ids.length === 0) return;
-  const service = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (service as any)
-    .from("notifications")
-    .update({ status: "acknowledged", acknowledged_at: new Date().toISOString() })
-    .eq("session_id", sessionId)
-    .eq("type", "order_ready")
-    .in("id", ids);
+  return { orders };
 }

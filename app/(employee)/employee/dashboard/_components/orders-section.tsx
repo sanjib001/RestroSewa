@@ -18,7 +18,7 @@ export function OrdersSection({
   initialOrders: QueueOrder[];
   canManage: boolean;
 }) {
-  const [stats, setStats] = useState<OrdersStats>({ total: initialOrders.length, pending: 0, ready: 0 });
+  const [stats, setStats] = useState<OrdersStats>({ total: initialOrders.length, pending: 0 });
   const [override, setOverride] = useState<boolean | null>(null);
   const [flash, setFlash] = useState(false);
   const prevTotal = useRef(stats.total);
@@ -47,7 +47,7 @@ export function OrdersSection({
   const open = override ?? stats.total > 0;
   const hasOrders = stats.total > 0;
   const subtitle = hasOrders
-    ? `${stats.pending} pending · ${stats.ready} ready · live`
+    ? `${stats.pending} pending · live`
     : "No active orders";
 
   return (

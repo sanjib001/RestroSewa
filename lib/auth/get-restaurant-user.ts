@@ -1,6 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
 import { redirect } from "next/navigation";
+import { getCurrentStaff } from "@/lib/auth/current-user";
 
 export type RestaurantUserCtx = {
   id: string;
@@ -9,25 +8,16 @@ export type RestaurantUserCtx = {
   permissions: string[];
 };
 
+/**
+ * The caller, for server actions.
+ *
+ * Was: an HTTP auth round-trip plus a staff-row query, EVERY time — and nearly
+ * every action calls it, so a dashboard rendering six sections paid for it six
+ * times over. It now reads the per-request cache: the first caller in a request
+ * pays, the rest are free. Same result, same redirect, same permissions.
+ */
 export async function getRestaurantUser(): Promise<RestaurantUserCtx> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const service = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: ru } = await (service as any)
-    .from("restaurant_users")
-    .select("id, restaurant_id, role, permissions")
-    .eq("auth_user_id", user.id)
-    .eq("is_active", true)
-    .is("deleted_at", null)
-    .maybeSingle();
-
-  if (!ru) redirect("/login");
-  const ctx = ru as RestaurantUserCtx;
-  if (!Array.isArray(ctx.permissions)) ctx.permissions = [];
-  return ctx;
+  const staff = await getCurrentStaff();
+  if (!staff) redirect("/login");
+  return staff;
 }
