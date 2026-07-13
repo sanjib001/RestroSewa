@@ -626,7 +626,10 @@ export function PurchasesClient({
         <>
           {/* Desktop table */}
           <div
-            className="hidden md:block rounded-xl border overflow-hidden"
+            // overflow-x-auto, not -hidden: on a tablet this table is wider than
+            // the column it sits in, and -hidden silently CLIPS the right-hand
+            // columns instead of letting them scroll into view.
+            className="hidden md:block rounded-xl border overflow-x-auto"
             style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas)" }}
           >
             <table className="w-full text-sm">

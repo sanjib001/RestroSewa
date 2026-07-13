@@ -2,7 +2,11 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { hasPermission, PERMISSIONS } from "@/lib/permissions";
-import { getMenuCategories, getMenuItemsByCategory } from "@/app/actions/menu";
+import {
+  getMenuCategories,
+  getMenuItemsByCategory,
+  getAvailableVariants,
+} from "@/app/actions/menu";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { MenuItemRow } from "@/app/actions/menu";
 import { MenuBrowser } from "./_components/menu-browser";
@@ -41,6 +45,10 @@ export default async function AddItemsPage({
   );
   const allItems: MenuItemRow[] = itemsByCategory.flat().filter((i) => i.availability_status === "available");
 
+  // Variants for the whole menu in one query — a staff member taking an order
+  // needs to pick the size at the counter, same as a guest does on their phone.
+  const variants = await getAvailableVariants(restaurant_id);
+
   return (
     <div className="flex flex-col h-[calc(100vh-56px)]">
       {/* Header */}
@@ -68,6 +76,7 @@ export default async function AddItemsPage({
         sessionId={sessionId}
         categories={activeCategories}
         items={allItems}
+        variants={variants}
       />
     </div>
   );

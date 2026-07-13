@@ -9,6 +9,7 @@ import { buildVisibilityFilter, getAssignedWorkstationIds } from "@/lib/assignme
 import { emitOrderReadyNotification } from "@/lib/notify";
 import { computeCreditStats, settlementOf } from "@/lib/credits";
 import type { BillSettlement, CreditStats } from "@/lib/credits";
+import { resolveOrderItems } from "@/lib/order-items";
 
 export type ActionResult = { error: string } | null;
 
@@ -48,13 +49,13 @@ export type SessionDetail = {
   total: number;
 };
 
+// What the client is allowed to choose: which dish, which variant, how many.
+// Name, price and workstation are NOT here — they are resolved from the menu
+// server-side (lib/order-items.ts), because a client that can name its own price
+// will eventually name a bad one.
 export type CartItem = {
   menu_item_id: string;
   variant_id: string | null;
-  item_name: string;
-  item_price: number;
-  workstation_id: string;
-  workstation_name: string;
   quantity: number;
   notes: string | null;
 };
@@ -423,6 +424,11 @@ export async function submitOrder(
 
   if (!cartItems?.length) return { error: "No items selected." };
 
+  // Name, price, variant and workstation are all resolved from the menu — the
+  // cart only ever chooses WHAT and HOW MANY. See lib/order-items.ts.
+  const resolved = await resolveOrderItems(service, ru.restaurant_id, cartItems);
+  if (!resolved.ok) return { error: resolved.error };
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: order, error: orderErr } = await (service as any)
     .from("session_orders")
@@ -439,19 +445,7 @@ export async function submitOrder(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error: itemsErr } = await (service as any)
     .from("session_order_items")
-    .insert(
-      cartItems.map((item) => ({
-        order_id: order.id,
-        menu_item_id: item.menu_item_id,
-        variant_id: item.variant_id,
-        workstation_id: item.workstation_id,
-        item_name: item.item_name,
-        item_price: item.item_price,
-        workstation_name: item.workstation_name,
-        quantity: item.quantity,
-        notes: item.notes,
-      }))
-    );
+    .insert(resolved.items.map((item) => ({ order_id: order.id, ...item })));
 
   if (itemsErr) return { error: "Failed to add items." };
 

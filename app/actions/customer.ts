@@ -3,6 +3,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 import { emitTableActivationRequest } from "@/lib/notify";
+import { resolveOrderItems } from "@/lib/order-items";
 
 export type CustomerOrderItem = {
   id: string;
@@ -29,12 +30,14 @@ export type CustomerOrderFeed = {
   ready: { id: string; order_id: string | null }[];
 };
 
+// A guest's cart is a REQUEST, not a price list. It says which dish, which
+// variant and how many; the name, the price and the kitchen station are all
+// resolved from the menu server-side (lib/order-items.ts). This used to carry
+// `item_price`, which was inserted onto the bill verbatim — so the phone decided
+// what the food cost.
 export type CustomerCartItem = {
   menu_item_id: string;
-  item_name: string;
-  item_price: number;
-  workstation_id: string;
-  workstation_name: string;
+  variant_id: string | null;
   quantity: number;
 };
 
@@ -153,29 +156,25 @@ async function insertSessionOrder(
   sessionId: string,
   restaurantId: string,
   items: CustomerCartItem[]
-): Promise<string | null> {
+): Promise<{ orderId: string | null; error?: string }> {
+  // Re-price against the menu before anything is written. A rejection here is a
+  // real answer for the guest ("that's out of stock"), not a generic failure.
+  const resolved = await resolveOrderItems(service, restaurantId, items);
+  if (!resolved.ok) return { orderId: null, error: resolved.error };
+
   const { data: order, error: orderErr } = await service
     .from("session_orders")
     .insert({ session_id: sessionId, restaurant_id: restaurantId, created_by: null })
     .select("id")
     .single();
-  if (orderErr || !order) return null;
+  if (orderErr || !order) return { orderId: null, error: "Failed to create order." };
 
-  const { error: itemsErr } = await service.from("session_order_items").insert(
-    items.map((item) => ({
-      order_id: order.id,
-      menu_item_id: item.menu_item_id,
-      variant_id: null,
-      workstation_id: item.workstation_id,
-      item_name: item.item_name,
-      item_price: item.item_price,
-      workstation_name: item.workstation_name,
-      quantity: item.quantity,
-      notes: null,
-    }))
-  );
-  if (itemsErr) return null;
-  return order.id as string;
+  const { error: itemsErr } = await service
+    .from("session_order_items")
+    .insert(resolved.items.map((item) => ({ order_id: order.id, ...item })));
+  if (itemsErr) return { orderId: null, error: "Failed to add items." };
+
+  return { orderId: order.id as string };
 }
 
 export type ActivationStatus = "none" | "pending" | "approved" | "rejected";
@@ -234,8 +233,10 @@ export async function requestTableActivation(
   // Table already activated by staff → order flows straight to the kitchen, no
   // re-verification.
   if (open && open.status === "active") {
-    const orderId = await insertSessionOrder(service, open.id, restaurantId, items);
-    if (!orderId) return { status: "error", sessionId: open.id, error: "Failed to create order." };
+    const { orderId, error } = await insertSessionOrder(service, open.id, restaurantId, items);
+    if (!orderId) {
+      return { status: "error", sessionId: open.id, error: error ?? "Failed to create order." };
+    }
     // The order shows up in the Orders queue directly — no notification row.
     revalidatePath("/employee/queue");
     return { status: "approved", sessionId: open.id };
@@ -261,8 +262,15 @@ export async function requestTableActivation(
     sessionId = created.id as string;
   }
 
-  const orderId = await insertSessionOrder(service, sessionId, restaurantId, items);
-  if (!orderId) return { status: "error", sessionId, error: "Failed to create order." };
+  const { orderId, error: itemsError } = await insertSessionOrder(
+    service,
+    sessionId,
+    restaurantId,
+    items
+  );
+  if (!orderId) {
+    return { status: "error", sessionId, error: itemsError ?? "Failed to create order." };
+  }
 
   // Only one live activation request per session (a second order placed while
   // still pending shouldn't spam staff — it'll surface with the session once
@@ -390,8 +398,8 @@ export async function submitCustomerOrder(
   if (!session || session.status !== "active") return { error: "Session is no longer active." };
   if (session.restaurant_id !== restaurantId) return { error: "Invalid session." };
 
-  const orderId = await insertSessionOrder(service, sessionId, restaurantId, items);
-  if (!orderId) return { error: "Failed to create order." };
+  const { orderId, error } = await insertSessionOrder(service, sessionId, restaurantId, items);
+  if (!orderId) return { error: error ?? "Failed to create order." };
 
   // The order appears in the staff Orders queue directly (driven by order rows) —
   // we deliberately do NOT create a notification row for it, so the Notifications

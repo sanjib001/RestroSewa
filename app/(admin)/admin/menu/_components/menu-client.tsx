@@ -19,6 +19,7 @@ import {
   deleteCategory,
   moveCategory,
   createVariant,
+  updateVariant,
   deleteVariant,
   createAddon,
   deleteAddon,
@@ -34,6 +35,8 @@ import type {
 import type { WorkstationRow } from "@/app/actions/workstations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { FoodMark } from "@/components/ui/food-mark";
+import { FOOD_TYPES, FOOD_TYPE_KEYS, type FoodType } from "@/lib/food-types";
 import {
   ChevronDown,
   ChevronRight,
@@ -41,18 +44,51 @@ import {
   Plus,
   Trash2,
   Pencil,
+  Check,
   X,
   Loader2,
 } from "lucide-react";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const FOOD_TYPE_CONFIG = {
-  veg:     { color: "#1a7a4a", label: "Veg" },
-  non_veg: { color: "#c0392b", label: "Non-Veg" },
-  vegan:   { color: "#2563eb", label: "Vegan" },
-  egg:     { color: "#b45309", label: "Egg" },
-} as const;
+// The food-type picker. The selected type fills with its own colour, so the
+// choice is legible at a glance while you're still typing the item — the radios
+// used to be `sr-only` with no rendered selected state at all, which is why the
+// selection appeared not to register until you saved.
+function FoodTypePicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (t: FoodType) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {FOOD_TYPE_KEYS.map((ft) => {
+        const cfg = FOOD_TYPES[ft];
+        const selected = value === ft;
+        return (
+          <button
+            key={ft}
+            type="button"
+            onClick={() => onChange(ft)}
+            aria-pressed={selected}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-colors"
+            style={{
+              borderColor: selected ? cfg.color : "var(--color-hairline)",
+              background: selected ? cfg.soft : "transparent",
+              color: selected ? cfg.color : "var(--color-ink-mute)",
+              fontWeight: selected ? 500 : 400,
+            }}
+          >
+            <FoodMark type={ft} size={13} />
+            {cfg.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 const STATUS_CONFIG = {
   available:    { color: "#1a7a4a", bg: "#f0fdf4", label: "Available" },
@@ -62,18 +98,6 @@ const STATUS_CONFIG = {
 
 const BADGE_OPTIONS = ["Featured", "Chef's Recommendation", "Best Seller", "New"] as const;
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
-
-function FoodDot({ type }: { type: string }) {
-  const cfg = FOOD_TYPE_CONFIG[type as keyof typeof FOOD_TYPE_CONFIG];
-  if (!cfg) return null;
-  return (
-    <span
-      title={cfg.label}
-      className="inline-block w-3 h-3 rounded-sm border flex-shrink-0"
-      style={{ borderColor: cfg.color, background: cfg.color + "22" }}
-    />
-  );
-}
 
 function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG];
@@ -160,6 +184,7 @@ function AddItemForm({
 }) {
   const [state, action, pending] = useActionState<ActionResult, FormData>(createMenuItem, null);
   const [submitted, setSubmitted] = useState(false);
+  const [foodType, setFoodType] = useState<FoodType>("veg");
 
   useEffect(() => { if (pending) setSubmitted(true); }, [pending]);
   useEffect(() => {
@@ -174,26 +199,19 @@ function AddItemForm({
     >
       <input type="hidden" name="restaurant_id" value={restaurantId} />
       <input type="hidden" name="category_id" value={categoryId} />
-      <div className="flex gap-2">
+      <input type="hidden" name="food_type" value={foodType} />
+      <div className="flex flex-col sm:flex-row gap-2">
         <Input name="name" placeholder="Item name" required className="flex-1" />
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: "var(--color-ink-mute)" }}>
             ₹
           </span>
-          <Input name="price" type="number" min="0" step="0.01" placeholder="0" required className="pl-7 w-28" />
+          <Input name="price" type="number" min="0" step="0.01" placeholder="0" required className="pl-7 w-full sm:w-28" />
         </div>
       </div>
-      <div className="flex gap-3 items-center">
+      <div className="flex flex-col gap-1.5">
         <label className="text-xs" style={{ color: "var(--color-ink-mute)" }}>Food type</label>
-        <div className="flex gap-2">
-          {(["veg", "non_veg", "vegan", "egg"] as const).map((ft) => (
-            <label key={ft} className="flex items-center gap-1 cursor-pointer text-xs" style={{ color: "var(--color-ink-mute)" }}>
-              <input type="radio" name="food_type" value={ft} defaultChecked={ft === "veg"} className="sr-only" />
-              <FoodDot type={ft} />
-              {FOOD_TYPE_CONFIG[ft].label}
-            </label>
-          ))}
-        </div>
+        <FoodTypePicker value={foodType} onChange={setFoodType} />
       </div>
       <Input name="description" placeholder="Description (optional)" />
       {state?.error && (
@@ -208,6 +226,145 @@ function AddItemForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+// ─── Variant line ─────────────────────────────────────────────────────────────
+
+// One variant, readable by default and editable in place. Editing a variant used
+// to be impossible — you could only add or delete one, so fixing a typo or a
+// price meant deleting the row and retyping it (and taking it off any menu that
+// referenced it in the meantime).
+function VariantLine({
+  variant,
+  onChanged,
+  onDelete,
+}: {
+  variant: VariantRow;
+  onChanged: () => void;
+  onDelete: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [state, dispatch, pending] = useActionState<ActionResult, FormData>(updateVariant, null);
+  const [submitted, setSubmitted] = useState(false);
+  const [, startToggle] = useTransition();
+
+  useEffect(() => { if (pending) setSubmitted(true); }, [pending]);
+  useEffect(() => {
+    if (submitted && !pending && state === null) {
+      setSubmitted(false);
+      setEditing(false);
+      onChanged();
+    }
+  }, [submitted, pending, state, onChanged]);
+
+  const rowStyle = {
+    borderColor: "var(--color-hairline)",
+    background: "var(--color-canvas)",
+  };
+
+  if (editing) {
+    return (
+      <form
+        action={dispatch}
+        className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-2 rounded-lg border"
+        style={{ ...rowStyle, borderColor: "var(--color-primary)" }}
+      >
+        <input type="hidden" name="id" value={variant.id} />
+        <input type="hidden" name="is_available" value={String(variant.is_available)} />
+        <Input name="name" defaultValue={variant.name} required className="flex-1 h-8 text-sm" />
+        <div className="relative w-full sm:w-24">
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--color-ink-mute)" }}>₹</span>
+          <Input
+            name="price"
+            type="number"
+            min="0"
+            step="0.01"
+            defaultValue={String(variant.price)}
+            required
+            className="pl-6 w-full h-8 text-sm"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="submit"
+            disabled={pending}
+            title="Save variant"
+            className="w-8 h-8 flex items-center justify-center rounded-md"
+            style={{ background: "var(--color-primary)", color: "#fff" }}
+          >
+            {pending ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+          </button>
+          <button
+            type="button"
+            title="Cancel"
+            onClick={() => setEditing(false)}
+            className="w-8 h-8 flex items-center justify-center rounded-md"
+            style={{ color: "var(--color-ink-mute)" }}
+          >
+            <X size={13} />
+          </button>
+        </div>
+        {state?.error && (
+          <p className="text-xs w-full" style={{ color: "var(--color-ruby)" }}>{state.error}</p>
+        )}
+      </form>
+    );
+  }
+
+  return (
+    <div
+      className="flex items-center gap-2 sm:gap-3 px-3 py-2 rounded-lg border"
+      style={{ ...rowStyle, opacity: variant.is_available ? 1 : 0.55 }}
+    >
+      <span className="flex-1 min-w-0 truncate text-sm" style={{ color: "var(--color-ink)" }}>
+        {variant.name}
+      </span>
+      <span className="text-sm tabular-nums shrink-0" style={{ color: "var(--color-ink-mute)" }}>
+        ₹{Number(variant.price).toFixed(0)}
+      </span>
+
+      {/* Out-of-stock is a variant-level fact: the Large can run out while the
+          Small is still pouring. An unavailable variant vanishes from the guest's
+          picker rather than being orderable and then refused. */}
+      <button
+        type="button"
+        className="text-xs px-2 py-0.5 rounded-full border shrink-0"
+        style={variant.is_available
+          ? { color: "#1a7a4a", borderColor: "#1a7a4a44", background: "#f0fdf4" }
+          : { color: "var(--color-ink-mute)", borderColor: "var(--color-hairline)", background: "transparent" }
+        }
+        onClick={() => startToggle(async () => {
+          const fd = new FormData();
+          fd.set("id", variant.id);
+          fd.set("name", variant.name);
+          fd.set("price", String(variant.price));
+          fd.set("is_available", String(!variant.is_available));
+          const r = await updateVariant(null, fd);
+          if (r?.error) alert(r.error);
+          else onChanged();
+        })}
+      >
+        {variant.is_available ? "Available" : "Hidden"}
+      </button>
+
+      <button
+        type="button"
+        title="Edit variant"
+        onClick={() => setEditing(true)}
+        style={{ color: "var(--color-ink-mute)" }}
+      >
+        <Pencil size={13} />
+      </button>
+      <button
+        type="button"
+        title="Delete variant"
+        style={{ color: "var(--color-ink-mute)" }}
+        onClick={onDelete}
+      >
+        <Trash2 size={13} />
+      </button>
+    </div>
   );
 }
 
@@ -255,13 +412,15 @@ function itemToFields(item: MenuItemRow): FieldState {
   };
 }
 
+// No `restaurantId` prop: variants and add-ons are scoped by the menu item they
+// hang off, and the server derives the restaurant from the session. The panel
+// used to pass one down into a hidden form field, which is exactly the input the
+// server should never have been trusting.
 function ItemEditPanel({
   item,
-  restaurantId,
   onClose,
 }: {
   item: MenuItemRow;
-  restaurantId: string;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -483,27 +642,11 @@ function ItemEditPanel({
             </div>
             <div>
               <label className={labelCls} style={labelStyle}>Food type</label>
-              <div className="flex gap-3 mt-1">
-                {(["veg", "non_veg", "vegan", "egg"] as const).map(ft => (
-                  <label key={ft} className="flex items-center gap-1.5 cursor-pointer text-xs" style={{ color: "var(--color-ink)" }}>
-                    <input
-                      type="radio"
-                      name="_food_type_ui"
-                      value={ft}
-                      checked={fields.food_type === ft}
-                      onChange={() => setField("food_type", ft)}
-                      className="sr-only"
-                    />
-                    <span
-                      className="w-3.5 h-3.5 rounded-sm border flex items-center justify-center"
-                      style={{
-                        borderColor: FOOD_TYPE_CONFIG[ft].color,
-                        background: fields.food_type === ft ? FOOD_TYPE_CONFIG[ft].color : "transparent",
-                      }}
-                    />
-                    {FOOD_TYPE_CONFIG[ft].label}
-                  </label>
-                ))}
+              <div className="mt-1">
+                <FoodTypePicker
+                  value={fields.food_type}
+                  onChange={(ft) => setField("food_type", ft)}
+                />
               </div>
             </div>
           </div>
@@ -697,38 +840,33 @@ function ItemEditPanel({
                   No variants yet. Add sizes or versions of this item (e.g. Small, Medium, Large).
                 </p>
               )}
+              {variants.length > 0 && (
+                <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                  A guest picks one of these before adding {item.name} to their cart, and
+                  the variant&apos;s price is what they pay.
+                </p>
+              )}
               {variants.map(v => (
-                <div
+                <VariantLine
                   key={v.id}
-                  className="flex items-center gap-3 px-3 py-2 rounded-lg border"
-                  style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas)" }}
-                >
-                  <span className="flex-1 text-sm" style={{ color: "var(--color-ink)" }}>{v.name}</span>
-                  <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>₹{Number(v.price).toFixed(0)}</span>
-                  <button
-                    type="button"
-                    title="Delete variant"
-                    style={{ color: "var(--color-ink-mute)" }}
-                    onClick={() => startDeleteVar(async () => {
-                      const r = await deleteVariant(v.id);
-                      if (r?.error) alert(r.error);
-                      else getItemVariantsAndAddons(item.id).then(d => setVariants(d.variants));
-                    })}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
+                  variant={v}
+                  onChanged={() => getItemVariantsAndAddons(item.id).then(d => setVariants(d.variants))}
+                  onDelete={() => startDeleteVar(async () => {
+                    const r = await deleteVariant(v.id);
+                    if (r?.error) alert(r.error);
+                    else getItemVariantsAndAddons(item.id).then(d => setVariants(d.variants));
+                  })}
+                />
               ))}
 
               <form
                 action={createVarDispatch}
-                className="flex gap-2 mt-1 pt-2 border-t"
+                className="flex flex-col sm:flex-row gap-2 mt-1 pt-2 border-t"
                 style={{ borderColor: "var(--color-hairline)" }}
               >
                 <input type="hidden" name="menu_item_id" value={item.id} />
-                <input type="hidden" name="restaurant_id" value={restaurantId} />
                 <Input name="name" placeholder="e.g. Large" required className="flex-1" />
-                <div className="relative w-24">
+                <div className="relative w-full sm:w-24">
                   <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--color-ink-mute)" }}>₹</span>
                   <Input name="price" type="number" min="0" step="0.01" placeholder="0" required className="pl-6 w-full" />
                 </div>
@@ -794,7 +932,6 @@ function ItemEditPanel({
                 style={{ borderColor: "var(--color-hairline)" }}
               >
                 <input type="hidden" name="menu_item_id" value={item.id} />
-                <input type="hidden" name="restaurant_id" value={restaurantId} />
                 <Input name="name" placeholder="e.g. Extra Cheese" required className="flex-1" />
                 <div className="relative w-24">
                   <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--color-ink-mute)" }}>+₹</span>
@@ -817,7 +954,7 @@ function ItemEditPanel({
 
 // ─── Item Card ────────────────────────────────────────────────────────────────
 
-function ItemCard({ item, restaurantId }: { item: MenuItemRow; restaurantId: string }) {
+function ItemCard({ item }: { item: MenuItemRow }) {
   const [editing, setEditing] = useState(false);
   const [, startToggle] = useTransition();
   const [, startDelete] = useTransition();
@@ -830,7 +967,7 @@ function ItemCard({ item, restaurantId }: { item: MenuItemRow; restaurantId: str
         className="flex items-center gap-3 px-3 py-2.5 rounded-lg"
         style={{ opacity: isAvailable ? 1 : 0.6 }}
       >
-        <FoodDot type={item.food_type} />
+        <FoodMark type={item.food_type} size={13} />
 
         <p className="flex-1 text-sm truncate" style={{ color: "var(--color-ink)" }}>
           {item.name}
@@ -887,7 +1024,6 @@ function ItemCard({ item, restaurantId }: { item: MenuItemRow; restaurantId: str
       {editing && (
         <ItemEditPanel
           item={item}
-          restaurantId={restaurantId}
           onClose={() => setEditing(false)}
         />
       )}
@@ -1098,7 +1234,7 @@ function CategoryAccordion({
             </p>
           )}
           {catItems.map((item) => (
-            <ItemCard key={item.id} item={item} restaurantId={restaurantId} />
+            <ItemCard key={item.id} item={item} />
           ))}
           {addingItem && (
             <AddItemForm

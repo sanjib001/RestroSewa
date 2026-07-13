@@ -60,29 +60,54 @@ export type ProductLink = {
   link_id: string;
   menu_item_id: string;
   menu_item_name: string;
+  /** Null when the line belongs to the item itself rather than one of its variants. */
+  variant_id: string | null;
+  variant_name: string | null;
   qty_per_unit: number;
 };
 
 export type ProductDetail = StockRow & {
   created_at: string;
-  /** Every menu item that consumes this product. */
+  /** Every menu item — or variant of one — that consumes this product. */
   links: ProductLink[];
 };
 
+export type RecipeLine = {
+  link_id: string;
+  product_id: string;
+  product_name: string;
+  unit: string;
+  qty_per_unit: number;
+};
+
 /**
- * A menu item and everything it consumes. `products` is a list because a menu
- * item may now have a recipe — one entry today is simply a recipe of one.
+ * A menu item, its recipe, and the recipes of any variants that have their own.
+ *
+ * The resolution rule (mirrored exactly in the `order_item_consumption` view, and
+ * that view is the one that actually decides): a sold line uses its VARIANT's
+ * recipe when the variant has one, and the item's recipe otherwise. A variant
+ * recipe REPLACES the item's — it does not add to it.
  */
 export type MenuItemLink = {
   menu_item_id: string;
   menu_item_name: string;
-  products: {
-    link_id: string;
-    product_id: string;
-    product_name: string;
-    unit: string;
-    qty_per_unit: number;
+  /** The item's own recipe. Applies to every variant that doesn't override it. */
+  base: RecipeLine[];
+  variants: {
+    variant_id: string;
+    variant_name: string;
+    /** True when this variant has its own lines, so `base` does NOT apply to it. */
+    overrides: boolean;
+    products: RecipeLine[];
   }[];
+};
+
+/** A thing a product can be attached to: a menu item, or one variant of one. */
+export type LinkTarget = {
+  menu_item_id: string;
+  variant_id: string | null;
+  /** "Momo" or "Momo · Chicken" */
+  label: string;
 };
 
 function sanitizeSearch(raw: string): string {
@@ -285,7 +310,9 @@ export async function getProductDetail(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("menu_item_products")
-      .select("id, menu_item_id, qty_per_unit, menu_items ( name )")
+      .select(
+        "id, menu_item_id, variant_id, qty_per_unit, menu_items ( name ), menu_item_variants ( name )"
+      )
       .eq("product_id", productId)
       .eq("restaurant_id", ru.restaurant_id),
   ]);
@@ -299,9 +326,16 @@ export async function getProductDetail(
         link_id: l.id,
         menu_item_id: l.menu_item_id,
         menu_item_name: l.menu_items?.name ?? "—",
+        variant_id: l.variant_id ?? null,
+        variant_name: l.menu_item_variants?.name ?? null,
         qty_per_unit: Number(l.qty_per_unit),
       }))
-      .sort((a, b) => a.menu_item_name.localeCompare(b.menu_item_name)),
+      // Group each item's lines together, its own recipe ahead of its variants'.
+      .sort(
+        (a, b) =>
+          a.menu_item_name.localeCompare(b.menu_item_name) ||
+          (a.variant_name ?? "").localeCompare(b.variant_name ?? "")
+      ),
   };
 }
 
@@ -530,15 +564,17 @@ export async function adjustStock(
   return null;
 }
 
-// ─── Menu item ↔ product links ────────────────────────────────────────────────
-// This link is what makes a POS sale deduct stock. One product per menu item.
+// ─── Recipes: what a sale deducts ─────────────────────────────────────────────
+// A recipe line attaches a product to a menu item, or to ONE VARIANT of it. The
+// variant's recipe wins where it exists; the item's is the fallback. See the
+// `order_item_consumption` view — it is what actually decides, at read time.
 
 export async function getMenuItemLinks(): Promise<MenuItemLink[]> {
   const ru = await getRestaurantUser();
   if (!STOCK_ACCESS.canViewStock(ru)) return [];
 
   const service = createServiceClient();
-  const [menuRes, linkRes] = await Promise.all([
+  const [menuRes, varRes, linkRes] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("menu_items")
@@ -548,41 +584,64 @@ export async function getMenuItemLinks(): Promise<MenuItemLink[]> {
       .order("name"),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
+      .from("menu_item_variants")
+      .select("id, menu_item_id, name, sort_order, menu_items!inner(restaurant_id)")
+      .eq("menu_items.restaurant_id", ru.restaurant_id)
+      .order("sort_order"),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
       .from("menu_item_products")
-      .select("id, menu_item_id, product_id, qty_per_unit, products ( name, unit )")
+      .select("id, menu_item_id, variant_id, product_id, qty_per_unit, products ( name, unit )")
       .eq("restaurant_id", ru.restaurant_id),
   ]);
 
-  // A menu item may have SEVERAL products now, so links are grouped, not mapped.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const byItem = new Map<string, any[]>();
+  const toLine = (l: any): RecipeLine => ({
+    link_id: l.id,
+    product_id: l.product_id,
+    product_name: l.products?.name ?? "—",
+    unit: l.products?.unit ?? "",
+    qty_per_unit: Number(l.qty_per_unit),
+  });
+  const byName = (a: RecipeLine, b: RecipeLine) => a.product_name.localeCompare(b.product_name);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const l of (linkRes.data ?? []) as any[]) {
-    if (!byItem.has(l.menu_item_id)) byItem.set(l.menu_item_id, []);
-    byItem.get(l.menu_item_id)!.push(l);
-  }
+  const allLinks = (linkRes.data ?? []) as any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const allVariants = (varRes.data ?? []) as any[];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return ((menuRes.data ?? []) as any[]).map((m) => ({
     menu_item_id: m.id,
     menu_item_name: m.name,
-    products: (byItem.get(m.id) ?? [])
-      .map((l) => ({
-        link_id: l.id,
-        product_id: l.product_id,
-        product_name: l.products?.name ?? "—",
-        unit: l.products?.unit ?? "",
-        qty_per_unit: Number(l.qty_per_unit),
-      }))
-      .sort((a, b) => a.product_name.localeCompare(b.product_name)),
+    base: allLinks
+      .filter((l) => l.menu_item_id === m.id && l.variant_id === null)
+      .map(toLine)
+      .sort(byName),
+    // EVERY variant is listed, including those with no recipe of their own — a
+    // variant that silently inherits the item's recipe is a thing the admin needs
+    // to be able to see, not a thing that quietly isn't there.
+    variants: allVariants
+      .filter((v) => v.menu_item_id === m.id)
+      .map((v) => {
+        const products = allLinks
+          .filter((l) => l.variant_id === v.id)
+          .map(toLine)
+          .sort(byName);
+        return {
+          variant_id: v.id,
+          variant_name: v.name,
+          overrides: products.length > 0,
+          products,
+        };
+      }),
   }));
 }
 
 /**
- * Attach a product to a menu item, or change how much of it that item consumes.
- * Many-to-many: a product may feed many menu items, and a menu item may consume
- * several products. Re-linking the same pair updates the quantity rather than
- * creating a duplicate.
+ * Attach a product to a menu item — or to one variant of it — and set how much of
+ * it a single sale consumes. Re-linking the same target and product updates the
+ * quantity rather than creating a duplicate.
  */
 export async function linkMenuItem(
   _prevState: ActionResult,
@@ -595,6 +654,8 @@ export async function linkMenuItem(
 
   const menuItemId = formData.get("menu_item_id") as string;
   const productId = formData.get("product_id") as string;
+  // Empty string means "the item itself", not "a variant whose id is blank".
+  const variantId = ((formData.get("variant_id") as string) || "").trim() || null;
   const qtyRaw = (formData.get("qty_per_unit") as string) || "1";
   const qty = parseFloat(qtyRaw);
 
@@ -624,32 +685,65 @@ export async function linkMenuItem(
   if (!menuRes.data) return { error: "Menu item not found." };
   if (!prodRes.data) return { error: "Product not found." };
 
-  // Conflict is now on the PAIR: the same product can't be attached twice to the
-  // same menu item, but other products on that item are left alone.
+  // …and the variant, if given, must be a variant OF THAT ITEM. The DB enforces
+  // this too (rs_mip_variant_matches_item) — this is just the friendlier message.
+  if (variantId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: v } = await (service as any)
+      .from("menu_item_variants")
+      .select("id")
+      .eq("id", variantId)
+      .eq("menu_item_id", menuItemId)
+      .maybeSingle();
+    if (!v) return { error: "That variant does not belong to this menu item." };
+  }
+
+  // The uniqueness of a recipe line is (target, product), and "target" is a
+  // variant or an item — which two PARTIAL unique indexes express, and which
+  // PostgREST's `upsert` cannot infer. So the update-or-insert is done by hand.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (service as any)
+  let q = (service as any)
     .from("menu_item_products")
-    .upsert(
-      {
+    .select("id")
+    .eq("menu_item_id", menuItemId)
+    .eq("product_id", productId);
+  q = variantId ? q.eq("variant_id", variantId) : q.is("variant_id", null);
+  const { data: existing } = await q.maybeSingle();
+
+  const { error } = existing
+    ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (service as any)
+        .from("menu_item_products")
+        .update({ qty_per_unit: qty })
+        .eq("id", existing.id)
+    : // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (service as any).from("menu_item_products").insert({
         restaurant_id: ru.restaurant_id,
         menu_item_id: menuItemId,
+        variant_id: variantId,
         product_id: productId,
         qty_per_unit: qty,
-      },
-      { onConflict: "menu_item_id,product_id" }
-    );
+      });
 
-  if (error) return { error: "Could not link the menu item. Please try again." };
+  if (error) {
+    if (error.message?.includes("VARIANT_NOT_OF_ITEM")) {
+      return { error: "That variant does not belong to this menu item." };
+    }
+    return { error: "Could not link the menu item. Please try again." };
+  }
 
   revalidatePath("/admin/stock");
   return null;
 }
 
-/** Detach ONE product from ONE menu item, leaving any others intact. */
-export async function unlinkMenuItem(
-  menuItemId: string,
-  productId: string
-): Promise<ActionResult> {
+/**
+ * Remove ONE recipe line, leaving every other line intact.
+ *
+ * Keyed by the line's own id rather than by (menu_item, product): the same
+ * product can legitimately appear on the item AND on several of its variants, so
+ * that pair no longer identifies a single row.
+ */
+export async function unlinkMenuItem(linkId: string): Promise<ActionResult> {
   const ru = await getRestaurantUser();
   if (!STOCK_ACCESS.canManageStock(ru)) {
     return { error: "You don't have permission to manage stock." };
@@ -660,8 +754,7 @@ export async function unlinkMenuItem(
   const { error } = await (service as any)
     .from("menu_item_products")
     .delete()
-    .eq("menu_item_id", menuItemId)
-    .eq("product_id", productId)
+    .eq("id", linkId)
     .eq("restaurant_id", ru.restaurant_id);
 
   if (error) return { error: "Could not unlink the menu item. Please try again." };
@@ -670,22 +763,49 @@ export async function unlinkMenuItem(
   return null;
 }
 
-/** Menu items, for the product-centric link picker. */
-export async function getMenuItemOptions(): Promise<{ id: string; name: string }[]> {
+/**
+ * Everything a product can be attached to: each menu item, and each variant of
+ * each menu item, as separate targets.
+ */
+export async function getLinkTargets(): Promise<LinkTarget[]> {
   const ru = await getRestaurantUser();
   if (!STOCK_ACCESS.canViewStock(ru)) return [];
 
   const service = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (service as any)
-    .from("menu_items")
-    .select("id, name")
-    .eq("restaurant_id", ru.restaurant_id)
-    .not("is_deleted", "is", true)
-    .order("name");
+  const [menuRes, varRes] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("menu_items")
+      .select("id, name")
+      .eq("restaurant_id", ru.restaurant_id)
+      .not("is_deleted", "is", true)
+      .order("name"),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("menu_item_variants")
+      .select("id, menu_item_id, name, sort_order, menu_items!inner(restaurant_id)")
+      .eq("menu_items.restaurant_id", ru.restaurant_id)
+      .order("sort_order"),
+  ]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return ((data ?? []) as any[]).map((m) => ({ id: m.id, name: m.name }));
+  const variants = (varRes.data ?? []) as any[];
+  const targets: LinkTarget[] = [];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const m of ((menuRes.data ?? []) as any[])) {
+    // The item itself first — it is the fallback recipe every variant inherits
+    // unless it is given one of its own.
+    targets.push({ menu_item_id: m.id, variant_id: null, label: m.name });
+    for (const v of variants.filter((x) => x.menu_item_id === m.id)) {
+      targets.push({
+        menu_item_id: m.id,
+        variant_id: v.id,
+        label: `${m.name} · ${v.name}`,
+      });
+    }
+  }
+  return targets;
 }
 
 /** Active products, for the link + purchase pickers. */

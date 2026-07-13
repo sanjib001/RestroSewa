@@ -13,7 +13,6 @@ import {
   adjustStock,
   createProduct,
   getMenuItemLinks,
-  getMenuItemOptions,
   getProductDetail,
   getProductHistory,
   getStock,
@@ -25,8 +24,10 @@ import {
 } from "@/app/actions/stock";
 import type {
   ActionResult,
+  LinkTarget,
   MenuItemLink,
   ProductDetail,
+  RecipeLine,
   StockFilter,
   StockRow,
   StockSummary,
@@ -360,22 +361,26 @@ function DeductForm({
 
 // ── Menu items that use a product (product-centric linking) ───────────────────
 
+// The value of one <option> in the target picker: an item, or one variant of it.
+const targetValue = (t: LinkTarget) =>
+  t.variant_id ? `${t.menu_item_id}::${t.variant_id}` : t.menu_item_id;
+
 function ProductLinks({
   product,
   links,
-  menuItems,
+  targets,
   canManage,
   onChanged,
 }: {
   product: StockRow;
   links: ProductDetail["links"];
-  menuItems: { id: string; name: string }[];
+  targets: LinkTarget[];
   canManage: boolean;
   onChanged: () => void;
 }) {
   const [state, action, pending] = useActionState<ActionResult, FormData>(linkMenuItem, null);
   const [adding, setAdding] = useState(false);
-  const [menuItemId, setMenuItemId] = useState("");
+  const [target, setTarget] = useState("");
   const [perUnit, setPerUnit] = useState("");
   const [, startUnlink] = useTransition();
 
@@ -383,16 +388,22 @@ function ProductLinks({
   useEffect(() => {
     if (wasPending.current && !pending && !state?.error) {
       setAdding(false);
-      setMenuItemId("");
+      setTarget("");
       setPerUnit("");
       onChanged();
     }
     wasPending.current = pending;
   }, [pending, state, onChanged]);
 
-  // Don't offer a menu item that already consumes this product.
-  const linked = new Set(links.map((l) => l.menu_item_id));
-  const available = menuItems.filter((m) => !linked.has(m.id));
+  // Don't offer a target that already consumes this product. Keyed by item AND
+  // variant, so "Momo" and "Momo · Chicken" are offered independently — the whole
+  // point is that they can consume different things.
+  const linked = new Set(
+    links.map((l) => (l.variant_id ? `${l.menu_item_id}::${l.variant_id}` : l.menu_item_id))
+  );
+  const available = targets.filter((t) => !linked.has(targetValue(t)));
+
+  const chosen = targets.find((t) => targetValue(t) === target);
 
   return (
     <div>
@@ -436,6 +447,16 @@ function ProductLinks({
             >
               <span className="flex-1 min-w-0 text-sm truncate" style={{ color: "var(--color-ink)" }}>
                 {l.menu_item_name}
+                {/* The variant is the whole point of the row — a Chicken Momo can
+                    consume chicken while the Veg Momo next to it consumes paneer. */}
+                {l.variant_name && (
+                  <span
+                    className="ml-1.5 text-xs px-1.5 py-0.5 rounded-md"
+                    style={{ background: "rgba(99,102,241,0.08)", color: "var(--color-primary)" }}
+                  >
+                    {l.variant_name}
+                  </span>
+                )}
               </span>
               <span className="text-sm tabular-nums shrink-0" style={{ color: "var(--color-ink-mute)" }}>
                 {qty(l.qty_per_unit)} {product.unit}
@@ -443,10 +464,10 @@ function ProductLinks({
               {canManage && (
                 <button
                   type="button"
-                  aria-label={`Unlink ${l.menu_item_name}`}
+                  aria-label={`Unlink ${l.menu_item_name}${l.variant_name ? ` (${l.variant_name})` : ""}`}
                   onClick={() =>
                     startUnlink(async () => {
-                      await unlinkMenuItem(l.menu_item_id, product.id);
+                      await unlinkMenuItem(l.link_id);
                       onChanged();
                     })
                   }
@@ -468,20 +489,34 @@ function ProductLinks({
           style={{ background: "var(--color-canvas-soft)", borderColor: "var(--color-hairline)" }}
         >
           <input type="hidden" name="product_id" value={product.id} />
+          {/* The picker offers one value; the action wants the item and the
+              variant separately, so it's split back out here. */}
+          <input type="hidden" name="menu_item_id" value={chosen?.menu_item_id ?? ""} />
+          <input type="hidden" name="variant_id" value={chosen?.variant_id ?? ""} />
 
           <select
-            name="menu_item_id"
             required
-            value={menuItemId}
-            onChange={(e) => setMenuItemId(e.target.value)}
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
             className="w-full text-sm rounded-lg border px-2.5 py-1.5"
             style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline-input)", color: "var(--color-ink)" }}
           >
-            <option value="">Choose a menu item…</option>
-            {available.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
+            <option value="">Choose a menu item or variant…</option>
+            {available.map((t) => (
+              <option key={targetValue(t)} value={targetValue(t)}>
+                {t.label}
+              </option>
             ))}
           </select>
+
+          {/* Say out loud what attaching to a VARIANT means, because it changes
+              what the item's own recipe does. */}
+          {chosen?.variant_id && (
+            <p className="text-xs rounded-md px-2 py-1.5" style={{ background: "var(--color-canvas)", color: "var(--color-ink-mute)" }}>
+              This is the recipe for <strong>{chosen.label.split(" · ").pop()}</strong> only. Once a
+              variant has its own recipe, it stops using the item&apos;s.
+            </p>
+          )}
 
           <div className="flex items-center gap-2">
             <Input
@@ -517,7 +552,7 @@ function ProductLinks({
             </button>
             <button
               type="submit"
-              disabled={pending || !menuItemId}
+              disabled={pending || !target}
               className="flex-1 text-sm py-1.5 rounded-lg font-medium disabled:opacity-50"
               style={{ background: "var(--color-primary)", color: "#fff" }}
             >
@@ -646,13 +681,13 @@ function HistoryList({ productId, unit }: { productId: string; unit: string }) {
 function ProductDetailView({
   product,
   day,
-  menuItems,
+  targets,
   canManage,
   onChanged,
 }: {
   product: StockRow;
   day: string;
-  menuItems: { id: string; name: string }[];
+  targets: LinkTarget[];
   canManage: boolean;
   onChanged: () => void;
 }) {
@@ -746,7 +781,7 @@ function ProductDetailView({
       <ProductLinks
         product={product}
         links={detail.links}
-        menuItems={menuItems}
+        targets={targets}
         canManage={canManage}
         onChanged={reloadDetail}
       />
@@ -795,13 +830,37 @@ function MenuLinks({ canManage, onOpenProduct }: { canManage: boolean; onOpenPro
     );
   }
 
-  const unlinked = links.filter((l) => l.products.length === 0).length;
+  // A dish deducts nothing only if it has no recipe of its own AND no variant of
+  // it has one — a dish whose recipes all live on its variants is fully tracked.
+  const unlinked = links.filter(
+    (l) => l.base.length === 0 && !l.variants.some((v) => v.overrides)
+  ).length;
+
+  const line = (p: RecipeLine, onGone: () => void) => (
+    <div key={p.link_id} className="flex items-center gap-2 mt-1">
+      <span className="text-xs flex-1 min-w-0 truncate" style={{ color: "var(--color-ink-mute)" }}>
+        → {qty(p.qty_per_unit)} {p.unit} of {p.product_name}
+      </span>
+      {canManage && (
+        <button
+          type="button"
+          aria-label={`Unlink ${p.product_name}`}
+          onClick={() => startUnlink(async () => { await unlinkMenuItem(p.link_id); onGone(); })}
+          className="w-5 h-5 rounded flex items-center justify-center shrink-0"
+          style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink-mute)" }}
+        >
+          <X size={11} />
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-        What each menu item consumes when it sells. A product can feed many menu items — link
-        them from the product itself.
+        What each menu item consumes when it sells. A variant can have its own recipe — a Large
+        drawing down more than a Small, or a Chicken Momo drawing down something a Veg Momo never
+        touches. A variant with its own recipe stops using the item&apos;s.
       </p>
 
       {unlinked > 0 && (
@@ -818,47 +877,59 @@ function MenuLinks({ canManage, onOpenProduct }: { canManage: boolean; onOpenPro
       )}
 
       <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--color-hairline)" }}>
-        {links.map((l, i) => (
-          <div
-            key={l.menu_item_id}
-            className="px-4 py-2.5"
-            style={{ borderTop: i === 0 ? "none" : "1px solid var(--color-hairline)" }}
-          >
-            <div className="flex items-center gap-3">
-              <p className="flex-1 min-w-0 text-sm truncate" style={{ color: "var(--color-ink)" }}>
-                {l.menu_item_name}
-              </p>
-              {l.products.length === 0 && (
-                <span className="text-xs shrink-0" style={{ color: "#9a3412" }}>Deducts nothing</span>
-              )}
-            </div>
-
-            {/* A menu item may consume several products — each is listed. */}
-            {l.products.map((p) => (
-              <div key={p.link_id} className="flex items-center gap-2 mt-1 pl-3">
-                <span className="text-xs flex-1 min-w-0 truncate" style={{ color: "var(--color-ink-mute)" }}>
-                  → {qty(p.qty_per_unit)} {p.unit} of {p.product_name}
-                </span>
-                {canManage && (
-                  <button
-                    type="button"
-                    aria-label={`Unlink ${p.product_name}`}
-                    onClick={() =>
-                      startUnlink(async () => {
-                        await unlinkMenuItem(l.menu_item_id, p.product_id);
-                        await load();
-                      })
-                    }
-                    className="w-5 h-5 rounded flex items-center justify-center shrink-0"
-                    style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink-mute)" }}
-                  >
-                    <X size={11} />
-                  </button>
+        {links.map((l, i) => {
+          const tracked = l.base.length > 0 || l.variants.some((v) => v.overrides);
+          return (
+            <div
+              key={l.menu_item_id}
+              className="px-4 py-2.5"
+              style={{ borderTop: i === 0 ? "none" : "1px solid var(--color-hairline)" }}
+            >
+              <div className="flex items-center gap-3">
+                <p className="flex-1 min-w-0 text-sm truncate" style={{ color: "var(--color-ink)" }}>
+                  {l.menu_item_name}
+                </p>
+                {!tracked && (
+                  <span className="text-xs shrink-0" style={{ color: "#9a3412" }}>Deducts nothing</span>
                 )}
               </div>
-            ))}
-          </div>
-        ))}
+
+              {/* The item's own recipe. */}
+              <div className="pl-3">
+                {l.base.map((p) => line(p, load))}
+              </div>
+
+              {/* Then each variant. A variant with its own recipe shows it; one
+                  without says so out loud, because "inherits the item's recipe" is
+                  a decision, and a silent blank would look like a missing link. */}
+              {l.variants.map((v) => (
+                <div key={v.variant_id} className="mt-1.5 pl-3">
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="text-xs px-1.5 py-0.5 rounded-md shrink-0"
+                      style={{
+                        background: v.overrides ? "rgba(99,102,241,0.08)" : "var(--color-canvas-soft)",
+                        color: v.overrides ? "var(--color-primary)" : "var(--color-ink-mute)",
+                      }}
+                    >
+                      {v.variant_name}
+                    </span>
+                    {!v.overrides && (
+                      <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                        {l.base.length > 0
+                          ? "uses the item’s recipe"
+                          : "deducts nothing"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="pl-3">
+                    {v.products.map((p) => line(p, load))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })}
       </div>
 
       <button
@@ -879,13 +950,13 @@ export function StockClient({
   initialStock,
   initialSummary,
   products,
-  menuItems,
+  targets,
   canManage,
 }: {
   initialStock: StockRow[];
   initialSummary: StockSummary;
   products: ProductOption[];
-  menuItems: { id: string; name: string }[];
+  targets: LinkTarget[];
   canManage: boolean;
 }) {
   const [rows, setRows] = useState(initialStock);
@@ -1296,7 +1367,7 @@ export function StockClient({
           <ProductDetailView
             product={detailOf}
             day={day}
-            menuItems={menuItems}
+            targets={targets}
             canManage={canManage}
             onChanged={refresh}
           />

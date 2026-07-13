@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { STOCK_ACCESS } from "@/lib/permissions";
 import {
-  getMenuItemOptions,
+  getLinkTargets,
   getProductOptions,
   getStock,
   getStockSummary,
@@ -19,12 +19,13 @@ export default async function StockPage() {
     redirect("/employee/dashboard");
   }
 
-  const [stock, summary, products, menuItems] = await Promise.all([
+  const [stock, summary, products, targets] = await Promise.all([
     getStock({ filter: "all" }),
     getStockSummary(),
     getProductOptions(),
-    // For the product-centric link picker: attach a product to any menu item.
-    getMenuItemOptions(),
+    // For the product-centric link picker: attach a product to any menu item —
+    // or to one variant of it, which is how a Large deducts more than a Small.
+    getLinkTargets(),
   ]);
 
   return (
@@ -32,7 +33,7 @@ export default async function StockPage() {
       initialStock={stock}
       initialSummary={summary}
       products={products}
-      menuItems={menuItems}
+      targets={targets}
       canManage={STOCK_ACCESS.canManageStock(restaurantUser)}
     />
   );

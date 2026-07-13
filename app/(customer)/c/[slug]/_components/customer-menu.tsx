@@ -10,7 +10,9 @@ import {
 } from "react";
 import { useRealtime } from "@/lib/realtime/use-realtime";
 import { RestaurantLogo } from "@/components/branding/restaurant-logo";
-import type { CategoryRow, MenuItemRow } from "@/app/actions/menu";
+import { FoodMark } from "@/components/ui/food-mark";
+import type { FoodType } from "@/lib/food-types";
+import type { CategoryRow, MenuItemRow, VariantRow } from "@/app/actions/menu";
 import {
   sendNotification,
   verifyCustomerPin,
@@ -82,14 +84,7 @@ import {
 // dropped stream (flaky café wifi, phone waking from sleep).
 const POLL_MS = 60000;
 
-type FoodKey = "veg" | "non_veg" | "vegan" | "egg";
-
-const FOOD_TYPE_CONFIG: Record<FoodKey, { color: string; label: string }> = {
-  veg:     { color: "#16a34a", label: "Veg" },
-  non_veg: { color: "#dc2626", label: "Non-Veg" },
-  vegan:   { color: "#0d9488", label: "Vegan" },
-  egg:     { color: "#d97706", label: "Egg" },
-};
+type FoodKey = FoodType;
 
 // Per-order status presentation for the live tracker.
 const ORDER_STATUS_META: Record<
@@ -180,22 +175,27 @@ function AnimationStyles() {
 // extra request. A `__`-fenced literal cannot collide with a uuid.
 const ALL_CATEGORY_ID = "__all__";
 
+// ─── Cart line keys ──────────────────────────────────────────────────────────
+// A cart line is a dish AND the variant chosen for it. Two Large Coffees and one
+// Small Coffee are two lines, not three of one thing — they cost different
+// amounts and print differently on the kitchen ticket, so they can't share a key.
+
+type LineKey = string;
+
+const keyOf = (itemId: string, variantId: string | null): LineKey =>
+  variantId ? `${itemId}::${variantId}` : itemId;
+
+const parseKey = (key: LineKey): { itemId: string; variantId: string | null } => {
+  const [itemId, variantId] = key.split("::");
+  return { itemId, variantId: variantId ?? null };
+};
+
 // The monogram that used to live here is now the FALLBACK inside
 // <RestaurantLogo>, so an uploaded logo and the initials share one component
 // and one set of sizes.
 
 function DietMark({ type, size = 15 }: { type: FoodKey; size?: number }) {
-  const cfg = FOOD_TYPE_CONFIG[type];
-  return (
-    <span
-      title={cfg.label}
-      aria-label={cfg.label}
-      className="inline-flex items-center justify-center rounded-[4px] border-2 shrink-0"
-      style={{ width: size, height: size, borderColor: cfg.color }}
-    >
-      <span className="rounded-full" style={{ width: size * 0.42, height: size * 0.42, background: cfg.color }} />
-    </span>
-  );
+  return <FoodMark type={type} size={size} />;
 }
 
 function Pill({
@@ -857,10 +857,124 @@ function EmptyState({ Icon, title, body }: { Icon: React.ComponentType<{ size?: 
 
 // ─── Item card (text-first, image-free) ──────────────────────────────────────────
 
+// ─── Variant picker ──────────────────────────────────────────────────────────
+
+// "Select Size" / "Select Variation". A dish with variants has no single price,
+// so it can't be added straight to the cart — the guest chooses first, and what
+// they choose is what they pay.
+function VariantSheet({
+  item,
+  variants,
+  cart,
+  onAdd,
+  onRemove,
+  onClose,
+}: {
+  item: MenuItemRow | null;
+  variants: VariantRow[];
+  cart: Map<LineKey, number>;
+  onAdd: (key: LineKey) => void;
+  onRemove: (key: LineKey) => void;
+  onClose: () => void;
+}) {
+  if (!item) return null;
+
+  const chosen = variants.reduce(
+    (n, v) => n + (cart.get(keyOf(item.id, v.id)) ?? 0),
+    0
+  );
+
+  return (
+    <Sheet open={!!item} onClose={onClose} maxWidth={440} label={`Choose an option for ${item.name}`}>
+      <SheetHeader
+        title={item.name}
+        subtitle="Choose an option"
+        onClose={onClose}
+        icon={
+          <span className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "rgba(8,145,178,0.1)" }}>
+            <DietMark type={item.food_type as FoodKey} size={16} />
+          </span>
+        }
+      />
+
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 flex flex-col gap-2 rs-noscroll">
+        {variants.map((v) => {
+          const key = keyOf(item.id, v.id);
+          const qty = cart.get(key) ?? 0;
+          return (
+            <div
+              key={v.id}
+              className="flex items-center gap-3 p-3 rounded-2xl border"
+              style={{
+                background: qty > 0 ? "rgba(8,145,178,0.06)" : "var(--color-canvas-soft)",
+                borderColor: qty > 0 ? "var(--color-primary)" : "transparent",
+              }}
+            >
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate" style={{ color: "var(--color-ink)" }}>
+                  {v.name}
+                </p>
+                <p className="text-xs tabular" style={{ color: "var(--color-ink-mute)" }}>
+                  {rupee(Number(v.price))}
+                </p>
+              </div>
+
+              {qty === 0 ? (
+                <button
+                  type="button"
+                  onClick={() => onAdd(key)}
+                  className="h-10 px-5 rounded-xl flex items-center gap-1.5 text-sm font-semibold text-white rs-press"
+                  style={{ background: "linear-gradient(135deg,var(--color-primary),var(--color-primary-deep))" }}
+                >
+                  <Plus size={16} /> Add
+                </button>
+              ) : (
+                <div className="h-10 rounded-xl flex items-center gap-1 px-1" style={{ background: "linear-gradient(135deg,var(--color-primary),var(--color-primary-deep))" }}>
+                  <button
+                    type="button"
+                    aria-label={`One less ${v.name}`}
+                    onClick={() => onRemove(key)}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-white rs-press"
+                    style={{ background: "rgba(255,255,255,0.18)" }}
+                  >
+                    <Minus size={16} />
+                  </button>
+                  <span className="w-7 text-center text-sm font-semibold text-white tabular">{qty}</span>
+                  <button
+                    type="button"
+                    aria-label={`One more ${v.name}`}
+                    onClick={() => onAdd(key)}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-white rs-press"
+                    style={{ background: "rgba(255,255,255,0.18)" }}
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="px-4 py-4 border-t" style={{ borderColor: "var(--color-hairline)" }}>
+        <button
+          type="button"
+          onClick={onClose}
+          className="w-full py-3.5 rounded-2xl text-sm font-semibold text-white rs-press"
+          style={{ background: chosen > 0 ? "linear-gradient(135deg,var(--color-primary),var(--color-primary-deep))" : "var(--color-ink-mute)" }}
+        >
+          {chosen > 0 ? `Done · ${chosen} added` : "Close"}
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
 function ItemCard({
   item,
   categoryName,
   cartQty,
+  variants,
   canOrder,
   onAdd,
   onRemove,
@@ -868,6 +982,7 @@ function ItemCard({
   item: MenuItemRow;
   categoryName: string | null;
   cartQty: number;
+  variants: VariantRow[];
   canOrder: boolean;
   onAdd: () => void;
   onRemove: () => void;
@@ -876,6 +991,14 @@ function ItemCard({
   const spicy = isSpicy(item);
   const orderable = canOrder && !soldOut;
   const extraBadges = (item.badges ?? []).filter((b) => !/spic|hot|chilli|chili/i.test(b));
+
+  // With variants there is no single price to show, so the card shows the
+  // cheapest as "from ₹X" — the least they could pay — and the real prices live
+  // in the picker.
+  const hasVariants = variants.length > 0;
+  const displayPrice = hasVariants
+    ? Math.min(...variants.map((v) => Number(v.price)))
+    : Number(item.price);
 
   return (
     <div
@@ -891,7 +1014,12 @@ function ItemCard({
           {item.name}
         </h3>
         <span className="shrink-0 text-[15px] sm:text-base tabular" style={{ color: "var(--color-ink)", fontWeight: 600 }}>
-          {rupee(Number(item.price))}
+          {hasVariants && (
+            <span className="text-[11px] font-normal mr-0.5" style={{ color: "var(--color-ink-mute)" }}>
+              from
+            </span>
+          )}
+          {rupee(displayPrice)}
         </span>
       </div>
       {item.description && (
@@ -927,6 +1055,17 @@ function ItemCard({
           !soldOut && canOrder === false ? (
             <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>View only</span>
           ) : null
+        ) : /* A dish with variants always reopens the picker — a bare +/- on the
+              card would have no variant to apply itself to. */
+        hasVariants ? (
+          <button
+            type="button"
+            onClick={onAdd}
+            className="h-10 px-5 rounded-xl flex items-center justify-center gap-1.5 text-sm font-semibold text-white rs-press"
+            style={{ background: "linear-gradient(135deg,var(--color-primary),var(--color-primary-deep))", boxShadow: "0 6px 16px rgba(8,145,178,0.26)" }}
+          >
+            {cartQty > 0 ? <>Add more · {cartQty}</> : <>Choose <ChevronRight size={15} /></>}
+          </button>
         ) : cartQty === 0 ? (
           <button
             type="button"
@@ -959,6 +1098,7 @@ function CartDrawer({
   onClose,
   entries,
   items,
+  variantsOf,
   total,
   count,
   onAdd,
@@ -968,12 +1108,13 @@ function CartDrawer({
 }: {
   open: boolean;
   onClose: () => void;
-  entries: [string, number][];
+  entries: [LineKey, number][];
   items: MenuItemRow[];
+  variantsOf: Map<string, VariantRow[]>;
   total: number;
   count: number;
-  onAdd: (id: string) => void;
-  onRemove: (id: string) => void;
+  onAdd: (key: LineKey) => void;
+  onRemove: (key: LineKey) => void;
   onPlace: () => void;
   placing: boolean;
 }) {
@@ -989,26 +1130,43 @@ function CartDrawer({
         {entries.length === 0 ? (
           <EmptyState Icon={ShoppingBag} title="Your cart is empty" body="Browse the menu and add dishes — they'll appear here ready to order." />
         ) : (
-          entries.map(([id, qty]) => {
-            const item = items.find((i) => i.id === id);
+          entries.map(([key, qty]) => {
+            const { itemId, variantId } = parseKey(key);
+            const item = items.find((i) => i.id === itemId);
             if (!item) return null;
+            // The variant is what the guest actually chose, so it's what the cart
+            // has to show — and its price, not the base item's, is what they pay.
+            const variant = variantId
+              ? variantsOf.get(itemId)?.find((v) => v.id === variantId) ?? null
+              : null;
+            const unit = variant ? Number(variant.price) : Number(item.price);
             return (
-              <div key={id} className="flex items-center gap-3 p-3 rounded-2xl" style={{ background: "var(--color-canvas-soft)" }}>
+              <div key={key} className="flex items-center gap-3 p-3 rounded-2xl" style={{ background: "var(--color-canvas-soft)" }}>
                 <span className="shrink-0"><DietMark type={item.food_type as FoodKey} /></span>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate" style={{ color: "var(--color-ink)" }}>{item.name}</p>
-                  <p className="text-xs tabular" style={{ color: "var(--color-ink-mute)" }}>{rupee(Number(item.price))} each</p>
+                  <p className="text-xs tabular" style={{ color: "var(--color-ink-mute)" }}>
+                    {variant && (
+                      <span
+                        className="mr-1 px-1.5 py-0.5 rounded-md"
+                        style={{ background: "rgba(8,145,178,0.1)", color: "var(--color-primary)" }}
+                      >
+                        {variant.name}
+                      </span>
+                    )}
+                    {rupee(unit)} each
+                  </p>
                 </div>
                 <div className="flex items-center gap-1 rounded-xl p-0.5" style={{ background: "var(--color-canvas)" }}>
-                  <button type="button" aria-label="Remove one" onClick={() => onRemove(id)} className="w-8 h-8 rounded-lg flex items-center justify-center rs-press" style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink)" }}>
+                  <button type="button" aria-label="Remove one" onClick={() => onRemove(key)} className="w-8 h-8 rounded-lg flex items-center justify-center rs-press" style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink)" }}>
                     <Minus size={15} />
                   </button>
                   <span className="w-6 text-center text-sm font-semibold tabular" style={{ color: "var(--color-primary)" }}>{qty}</span>
-                  <button type="button" aria-label="Add one" onClick={() => onAdd(id)} className="w-8 h-8 rounded-lg flex items-center justify-center text-white rs-press" style={{ background: "var(--color-primary)" }}>
+                  <button type="button" aria-label="Add one" onClick={() => onAdd(key)} className="w-8 h-8 rounded-lg flex items-center justify-center text-white rs-press" style={{ background: "var(--color-primary)" }}>
                     <Plus size={15} />
                   </button>
                 </div>
-                <p className="w-14 text-right text-sm font-semibold tabular" style={{ color: "var(--color-ink)" }}>{rupee(Number(item.price) * qty)}</p>
+                <p className="w-14 text-right text-sm font-semibold tabular" style={{ color: "var(--color-ink)" }}>{rupee(unit * qty)}</p>
               </div>
             );
           })
@@ -1172,6 +1330,7 @@ export function CustomerMenu({
   qrMode,
   categories,
   items,
+  variants,
   initialNotifState,
   initialActivationStatus,
 }: {
@@ -1187,6 +1346,7 @@ export function CustomerMenu({
   qrMode: string;
   categories: CategoryRow[];
   items: MenuItemRow[];
+  variants: VariantRow[];
   initialNotifState: CustomerNotifState;
   initialActivationStatus: ActivationStatus;
 }) {
@@ -1220,10 +1380,23 @@ export function CustomerMenu({
   const [activeCategoryId, setActiveCategoryId] = useState<string>(ALL_CATEGORY_ID);
   const [pinVerified, setPinVerified] = useState(noPin);
   const [showPinEntry, setShowPinEntry] = useState(false);
-  const [cart, setCart] = useState<Map<string, number>>(new Map());
+  // Keyed by item AND variant — a Large Coffee and a Small Coffee are two lines.
+  const [cart, setCart] = useState<Map<LineKey, number>>(new Map());
   const [pendingAddItemId, setPendingAddItemId] = useState<string | null>(null);
+  // The item whose variant sheet is open ("Choose a size").
+  const [picking, setPicking] = useState<MenuItemRow | null>(null);
   const [placing, setPlacing] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(false);
+
+  const variantsOf = useMemo(() => {
+    const m = new Map<string, VariantRow[]>();
+    for (const v of variants) {
+      const list = m.get(v.menu_item_id);
+      if (list) list.push(v);
+      else m.set(v.menu_item_id, [v]);
+    }
+    return m;
+  }, [variants]);
 
   // Overlays
   const [showCart, setShowCart] = useState(false);
@@ -1261,10 +1434,9 @@ export function CustomerMenu({
 
   const cacheKey = contextId ?? "";
 
-  const workstationNameMap = useMemo(
-    () => new Map<string, string>(categories.map((c) => [c.workstation_id, c.workstation_name ?? ""])),
-    [categories]
-  );
+  // (The workstation map that used to live here is gone: the guest's phone no
+  // longer tells the server which kitchen station a dish routes to — the server
+  // reads that off the menu item, along with the name and the price.)
   const categoryNameMap = useMemo(() => new Map(categories.map((c) => [c.id, c.name])), [categories]);
 
   const prepRange = useMemo(() => {
@@ -1384,41 +1556,45 @@ export function CustomerMenu({
   }, [activeSessionId, contextId, restaurantId, tableId, roomId]);
 
   // ── Cart ──
+  const addByKey = useCallback((key: LineKey) => {
+    setCart((prev) => {
+      const next = new Map(prev);
+      next.set(key, Math.min((next.get(key) ?? 0) + 1, 99));
+      return next;
+    });
+  }, []);
+
+  const removeByKey = useCallback((key: LineKey) => {
+    setCart((prev) => {
+      const next = new Map(prev);
+      const qty = (next.get(key) ?? 0) - 1;
+      if (qty <= 0) next.delete(key);
+      else next.set(key, qty);
+      return next;
+    });
+  }, []);
+
+  // Tapping Add on a dish with variants can't add anything yet — which one, and
+  // at what price, isn't known until the guest chooses. It opens the sheet.
   const handleAdd = useCallback(
     (item: MenuItemRow) => {
       if (!canOrderNow) return;
       if (item.availability_status !== "available" || !item.is_available) return;
       if (!pinVerified) {
+        // Hold the tap: once the PIN lands we resume exactly where they were,
+        // sheet included.
         setPendingAddItemId(item.id);
         setShowPinEntry(true);
         return;
       }
-      setCart((prev) => {
-        const next = new Map(prev);
-        next.set(item.id, (next.get(item.id) ?? 0) + 1);
-        return next;
-      });
+      if (variantsOf.get(item.id)?.length) {
+        setPicking(item);
+        return;
+      }
+      addByKey(keyOf(item.id, null));
     },
-    [canOrderNow, pinVerified]
+    [canOrderNow, pinVerified, variantsOf, addByKey]
   );
-
-  const addById = useCallback((id: string) => {
-    setCart((prev) => {
-      const next = new Map(prev);
-      next.set(id, (next.get(id) ?? 0) + 1);
-      return next;
-    });
-  }, []);
-
-  const removeById = useCallback((id: string) => {
-    setCart((prev) => {
-      const next = new Map(prev);
-      const qty = (next.get(id) ?? 0) - 1;
-      if (qty <= 0) next.delete(id);
-      else next.set(id, qty);
-      return next;
-    });
-  }, []);
 
   const handlePinSuccess = useCallback(
     (resolvedSessionId: string) => {
@@ -1426,32 +1602,52 @@ export function CustomerMenu({
       setPinVerified(true);
       setShowPinEntry(false);
       if (pendingAddItemId) {
-        addById(pendingAddItemId);
+        const item = items.find((i) => i.id === pendingAddItemId);
+        if (item && variantsOf.get(item.id)?.length) setPicking(item);
+        else addByKey(keyOf(pendingAddItemId, null));
         setPendingAddItemId(null);
       }
     },
-    [pendingAddItemId, addById]
+    [pendingAddItemId, addByKey, items, variantsOf]
+  );
+
+  // Price and label for a cart line — from the chosen variant when there is one.
+  // These are for DISPLAY only; the bill is priced from the menu server-side.
+  const priceOfLine = useCallback(
+    (itemId: string, variantId: string | null): number => {
+      if (variantId) {
+        const v = variantsOf.get(itemId)?.find((x) => x.id === variantId);
+        if (v) return Number(v.price);
+      }
+      return Number(items.find((i) => i.id === itemId)?.price ?? 0);
+    },
+    [items, variantsOf]
   );
 
   const cartEntries = Array.from(cart.entries());
-  const cartTotal = cartEntries.reduce((sum, [id, qty]) => {
-    const item = items.find((i) => i.id === id);
-    return sum + (item ? Number(item.price) * qty : 0);
+  const cartTotal = cartEntries.reduce((sum, [key, qty]) => {
+    const { itemId, variantId } = parseKey(key);
+    return sum + priceOfLine(itemId, variantId) * qty;
   }, 0);
   const cartCount = cartEntries.reduce((sum, [, qty]) => sum + qty, 0);
 
+  // How many of this dish are in the cart across every variant of it.
+  const qtyOfItem = useCallback(
+    (itemId: string): number => {
+      let total = 0;
+      for (const [key, qty] of cart) {
+        if (parseKey(key).itemId === itemId) total += qty;
+      }
+      return total;
+    },
+    [cart]
+  );
+
   function buildOrderItems(): CustomerCartItem[] {
-    return cartEntries.flatMap(([id, qty]) => {
-      const item = items.find((i) => i.id === id);
-      if (!item) return [];
-      return [{
-        menu_item_id: id,
-        item_name: item.name,
-        item_price: Number(item.price),
-        workstation_id: item.workstation_id,
-        workstation_name: workstationNameMap.get(item.workstation_id) ?? "",
-        quantity: qty,
-      }];
+    // Ids and quantities only. The server looks up the name and the price.
+    return cartEntries.map(([key, quantity]) => {
+      const { itemId, variantId } = parseKey(key);
+      return { menu_item_id: itemId, variant_id: variantId, quantity };
     });
   }
 
@@ -1928,10 +2124,11 @@ export function CustomerMenu({
                         // The heading above already names the category — repeating it
                         // on every card would be noise.
                         categoryName={null}
-                        cartQty={cart.get(item.id) ?? 0}
+                        cartQty={qtyOfItem(item.id)}
+                        variants={variantsOf.get(item.id) ?? []}
                         canOrder={canOrderNow}
                         onAdd={() => handleAdd(item)}
-                        onRemove={() => removeById(item.id)}
+                        onRemove={() => removeByKey(keyOf(item.id, null))}
                       />
                     ))}
                   </div>
@@ -1946,10 +2143,11 @@ export function CustomerMenu({
                 key={item.id}
                 item={item}
                 categoryName={searchActive ? (categoryNameMap.get(item.category_id) ?? null) : null}
-                cartQty={cart.get(item.id) ?? 0}
+                cartQty={qtyOfItem(item.id)}
+                variants={variantsOf.get(item.id) ?? []}
                 canOrder={canOrderNow}
                 onAdd={() => handleAdd(item)}
-                onRemove={() => removeById(item.id)}
+                onRemove={() => removeByKey(keyOf(item.id, null))}
               />
             ))}
           </div>
@@ -2008,15 +2206,25 @@ export function CustomerMenu({
       )}
 
       {/* Overlays */}
+      <VariantSheet
+        item={picking}
+        variants={picking ? variantsOf.get(picking.id) ?? [] : []}
+        cart={cart}
+        onAdd={addByKey}
+        onRemove={removeByKey}
+        onClose={() => setPicking(null)}
+      />
+
       <CartDrawer
         open={showCart}
         onClose={() => setShowCart(false)}
         entries={cartEntries}
         items={items}
+        variantsOf={variantsOf}
         total={cartTotal}
         count={cartCount}
-        onAdd={addById}
-        onRemove={removeById}
+        onAdd={addByKey}
+        onRemove={removeByKey}
         onPlace={placeOrder}
         placing={placing}
       />

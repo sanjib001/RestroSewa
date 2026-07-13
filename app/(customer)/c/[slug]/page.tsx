@@ -1,6 +1,10 @@
 import { notFound } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/service";
-import { getMenuCategories, getMenuItemsByCategory } from "@/app/actions/menu";
+import {
+  getMenuCategories,
+  getMenuItemsByCategory,
+  getAvailableVariants,
+} from "@/app/actions/menu";
 import type { MenuItemRow } from "@/app/actions/menu";
 import { getCustomerNotifState, getCustomerActivationState } from "@/app/actions/customer";
 import type { ActivationStatus } from "@/app/actions/customer";
@@ -151,6 +155,10 @@ export default async function CustomerMenuPage({
     allItems.some((i) => i.category_id === c.id)
   );
 
+  // Only AVAILABLE variants come back, so a size that has run out simply isn't
+  // offered — the guest never picks something that would be refused on submit.
+  const variants = await getAvailableVariants(restaurant.id);
+
   return (
     <>
       {/* The RestroSewa moment. Overlays the menu while it renders underneath, so
@@ -170,6 +178,7 @@ export default async function CustomerMenuPage({
         qrMode={qrMode}
         categories={categoriesWithItems}
         items={allItems}
+        variants={variants}
         initialNotifState={initialNotifState}
         initialActivationStatus={initialActivationStatus}
       />

@@ -485,6 +485,71 @@ export async function getItemVariantsAndAddons(itemId: string): Promise<{
   };
 }
 
+// Does this menu item belong to the caller's restaurant?
+//
+// This is the check that was missing. The old code took `restaurant_id` from a
+// HIDDEN FORM FIELD — i.e. from the browser — and never checked it against the
+// menu item at all, while `deleteVariant` took a bare id and checked nothing
+// whatsoever. An admin of restaurant A could add or delete variants on
+// restaurant B's menu by posting B's ids. Ownership is derived from the session
+// (`ru.restaurant_id`) and verified against the DB; the client no longer gets a
+// say in which restaurant it is writing to.
+async function ownsMenuItem(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  service: any,
+  menuItemId: string,
+  restaurantId: string
+): Promise<boolean> {
+  if (!menuItemId) return false;
+  const { data } = await service
+    .from("menu_items")
+    .select("id")
+    .eq("id", menuItemId)
+    .eq("restaurant_id", restaurantId)
+    .maybeSingle();
+  return Boolean(data);
+}
+
+// Resolve the item a variant hangs off, so delete/update can be ownership-checked
+// from the variant id alone.
+async function variantOwnerItem(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  service: any,
+  variantId: string
+): Promise<string | null> {
+  const { data } = await service
+    .from("menu_item_variants")
+    .select("menu_item_id")
+    .eq("id", variantId)
+    .maybeSingle();
+  return (data?.menu_item_id as string) ?? null;
+}
+
+// Every variant on the restaurant's menu, in one round trip. The ordering pages
+// (customer menu, POS) need variants for EVERY item they render; fetching them
+// per item would be a query per dish. Only available variants are returned —
+// an unavailable variant is one a guest must not be able to order.
+export async function getAvailableVariants(restaurantId: string): Promise<VariantRow[]> {
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("menu_item_variants")
+    .select("id, menu_item_id, name, price, is_available, sort_order, menu_items!inner(restaurant_id)")
+    .eq("menu_items.restaurant_id", restaurantId)
+    .eq("is_available", true)
+    .order("sort_order")
+    .order("name");
+
+  return ((data as Record<string, unknown>[]) ?? []).map((v) => ({
+    id: v.id as string,
+    menu_item_id: v.menu_item_id as string,
+    name: v.name as string,
+    price: Number(v.price),
+    is_available: Boolean(v.is_available),
+    sort_order: Number(v.sort_order ?? 0),
+  }));
+}
+
 export async function createVariant(
   _prevState: ActionResult,
   formData: FormData
@@ -492,19 +557,74 @@ export async function createVariant(
   const ru = await getRestaurantUser();
   if (!hasPermission(ru, PERMISSIONS.MANAGE_MENU)) return { error: "Permission denied." };
 
-  const menuItemId   = formData.get("menu_item_id") as string;
-  const restaurantId = formData.get("restaurant_id") as string;
-  const name         = (formData.get("name") as string)?.trim();
-  const price        = parseFloat(formData.get("price") as string);
+  const menuItemId = formData.get("menu_item_id") as string;
+  const name       = (formData.get("name") as string)?.trim();
+  const price      = parseFloat(formData.get("price") as string);
 
   if (!name || !menuItemId) return { error: "Name is required." };
   if (isNaN(price) || price < 0) return { error: "Price must be non-negative." };
 
   const service = createServiceClient();
+  if (!(await ownsMenuItem(service, menuItemId, ru!.restaurant_id))) {
+    return { error: "Menu item not found." };
+  }
+
+  // Variants are listed in the order the admin added them (Small, Medium, Large
+  // — not Large, Medium, Small alphabetically). sort_order defaulted to 0 on
+  // every row, which meant the list silently fell back to sorting by name.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: last } = await (service as any)
+    .from("menu_item_variants")
+    .select("sort_order")
+    .eq("menu_item_id", menuItemId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // NOTE: no `restaurant_id` here. The column does not exist on this table —
+  // inserting it is what made every previous variant insert fail.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any)
     .from("menu_item_variants")
-    .insert({ restaurant_id: restaurantId, menu_item_id: menuItemId, name, price });
+    .insert({
+      menu_item_id: menuItemId,
+      name,
+      price,
+      sort_order: (last?.sort_order ?? -1) + 1,
+    });
+
+  if (error) return { error: error.message };
+  revalidatePath("/admin/menu");
+  revalidatePath("/employee/menu");
+  return null;
+}
+
+export async function updateVariant(
+  _prevState: ActionResult,
+  formData: FormData
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!hasPermission(ru, PERMISSIONS.MANAGE_MENU)) return { error: "Permission denied." };
+
+  const id    = formData.get("id") as string;
+  const name  = (formData.get("name") as string)?.trim();
+  const price = parseFloat(formData.get("price") as string);
+  const isAvailable = formData.get("is_available") !== "false";
+
+  if (!id || !name) return { error: "Name is required." };
+  if (isNaN(price) || price < 0) return { error: "Price must be non-negative." };
+
+  const service = createServiceClient();
+  const itemId = await variantOwnerItem(service, id);
+  if (!itemId || !(await ownsMenuItem(service, itemId, ru!.restaurant_id))) {
+    return { error: "Variant not found." };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("menu_item_variants")
+    .update({ name, price, is_available: isAvailable })
+    .eq("id", id);
 
   if (error) return { error: error.message };
   revalidatePath("/admin/menu");
@@ -515,7 +635,15 @@ export async function createVariant(
 export async function deleteVariant(id: string): Promise<ActionResult> {
   const ru = await getRestaurantUser();
   if (!hasPermission(ru, PERMISSIONS.MANAGE_MENU)) return { error: "Permission denied." };
+
   const service = createServiceClient();
+  const itemId = await variantOwnerItem(service, id);
+  if (!itemId || !(await ownsMenuItem(service, itemId, ru!.restaurant_id))) {
+    return { error: "Variant not found." };
+  }
+
+  // Orders that already used this variant keep their name/price snapshot — the
+  // FK is `on delete set null`, so history reads exactly as it did when sold.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any).from("menu_item_variants").delete().eq("id", id);
   if (error) return { error: error.message };
@@ -533,19 +661,24 @@ export async function createAddon(
   const ru = await getRestaurantUser();
   if (!hasPermission(ru, PERMISSIONS.MANAGE_MENU)) return { error: "Permission denied." };
 
-  const menuItemId   = formData.get("menu_item_id") as string;
-  const restaurantId = formData.get("restaurant_id") as string;
-  const name         = (formData.get("name") as string)?.trim();
-  const price        = parseFloat(formData.get("price") as string) || 0;
-  const isRequired   = formData.get("is_required") === "true";
+  const menuItemId = formData.get("menu_item_id") as string;
+  const name       = (formData.get("name") as string)?.trim();
+  const price      = parseFloat(formData.get("price") as string) || 0;
+  const isRequired = formData.get("is_required") === "true";
 
   if (!name || !menuItemId) return { error: "Name is required." };
 
   const service = createServiceClient();
+  if (!(await ownsMenuItem(service, menuItemId, ru!.restaurant_id))) {
+    return { error: "Menu item not found." };
+  }
+
+  // Same phantom-column bug as variants: `restaurant_id` is not on this table,
+  // so every add-on insert has been failing too.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any)
     .from("menu_item_addons")
-    .insert({ restaurant_id: restaurantId, menu_item_id: menuItemId, name, price, is_required: isRequired });
+    .insert({ menu_item_id: menuItemId, name, price, is_required: isRequired });
 
   if (error) return { error: error.message };
   revalidatePath("/admin/menu");
@@ -556,7 +689,18 @@ export async function createAddon(
 export async function deleteAddon(id: string): Promise<ActionResult> {
   const ru = await getRestaurantUser();
   if (!hasPermission(ru, PERMISSIONS.MANAGE_MENU)) return { error: "Permission denied." };
+
   const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: owner } = await (service as any)
+    .from("menu_item_addons")
+    .select("menu_item_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (!owner || !(await ownsMenuItem(service, owner.menu_item_id, ru!.restaurant_id))) {
+    return { error: "Add-on not found." };
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any).from("menu_item_addons").delete().eq("id", id);
   if (error) return { error: error.message };
