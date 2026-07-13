@@ -7,6 +7,7 @@ import type { RestaurantRow, StaffRow } from "@/app/actions/restaurants";
 import { resetStaffPin } from "@/app/actions/staff";
 import { Button } from "@/components/ui/button";
 import { ExternalLink, KeyRound, Power, PowerOff, ShieldCheck, X, Check } from "lucide-react";
+import { DangerZone } from "./danger-zone";
 
 const PIN_LENGTH = 4;
 const KEYPAD = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"] as const;
@@ -202,6 +203,11 @@ export function SettingsClient({ restaurants }: { restaurants: RestaurantRow[] }
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, startLoad] = useTransition();
   const [statusPending, startStatus] = useTransition();
+  // A deleted restaurant has to leave the picker immediately. Waiting for the
+  // server to revalidate would leave a name in the list that resolves to nothing.
+  const [deleted, setDeleted] = useState<string[]>([]);
+
+  const options = restaurants.filter((r) => !deleted.includes(r.id));
 
   function selectRestaurant(id: string) {
     setSelectedId(id);
@@ -257,7 +263,7 @@ export function SettingsClient({ restaurants }: { restaurants: RestaurantRow[] }
           style={{ borderColor: "var(--color-hairline-input)", color: "var(--color-ink)", background: "var(--color-canvas)" }}
         >
           <option value="">Choose a restaurant…</option>
-          {restaurants.map((r) => (
+          {options.map((r) => (
             <option key={r.id} value={r.id}>
               {r.name}{r.is_active ? "" : " (inactive)"}
             </option>
@@ -368,6 +374,18 @@ export function SettingsClient({ restaurants }: { restaurants: RestaurantRow[] }
               </div>
             )}
           </div>
+
+          {/* Last on the page, deliberately: nothing routine sits below it, so
+              neither button is ever next to something clicked out of habit. */}
+          <DangerZone
+            restaurantId={detail.restaurant.id}
+            restaurantName={detail.restaurant.name}
+            onDeleted={() => {
+              setDeleted((d) => [...d, detail.restaurant.id]);
+              setDetail(null);
+              setSelectedId("");
+            }}
+          />
         </>
       )}
     </div>

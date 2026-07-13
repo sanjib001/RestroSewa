@@ -1,9 +1,13 @@
 "use server";
 
 import { createServiceClient } from "@/lib/supabase/service";
+import { requireSuperAdmin } from "@/lib/auth/guards";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+// The (superadmin) layout guards page RENDERING. A server action is a POST
+// endpoint in its own right — reachable without ever loading that layout — so
+// every action that reads or writes another restaurant's data checks for itself.
 export type ActionResult = { error: string } | { redirectTo: string } | null;
 
 export type RestaurantRow = {
@@ -39,6 +43,8 @@ export type StaffRow = {
 };
 
 export async function getAllRestaurants(): Promise<RestaurantRow[]> {
+  await requireSuperAdmin();
+
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (service as any)
@@ -52,6 +58,8 @@ export async function getAllRestaurants(): Promise<RestaurantRow[]> {
 export async function getRestaurantWithStaff(
   id: string
 ): Promise<{ restaurant: RestaurantDetail; staff: StaffRow[] } | null> {
+  await requireSuperAdmin();
+
   const service = createServiceClient();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -81,6 +89,8 @@ export async function createRestaurant(
   _prevState: ActionResult,
   formData: FormData
 ): Promise<ActionResult> {
+  await requireSuperAdmin();
+
   const name = (formData.get("name") as string)?.trim();
   const slug = (formData.get("slug") as string)?.trim();
   const type = formData.get("type") as string;
@@ -138,6 +148,8 @@ export async function createRestaurant(
 }
 
 export async function toggleRestaurantStatus(id: string, makeActive: boolean) {
+  await requireSuperAdmin();
+
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (service as any)
@@ -153,6 +165,8 @@ export async function updateRestaurant(
   _prevState: ActionResult,
   formData: FormData
 ): Promise<ActionResult> {
+  await requireSuperAdmin();
+
   const id = formData.get("id") as string;
   if (!id) return { error: "Invalid request." };
 
