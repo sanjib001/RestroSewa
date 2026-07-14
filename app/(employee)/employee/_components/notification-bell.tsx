@@ -9,6 +9,7 @@ import {
 import type { NotificationRow } from "@/app/actions/notifications";
 import { approveTableActivation, rejectTableActivation } from "@/app/actions/pos";
 import { useRealtime } from "@/lib/realtime/use-realtime";
+import { PushPrompt } from "@/components/pwa/push-prompt";
 import { formatTime } from "@/lib/format-time";
 import { ArrowDown, Bell, Check, CheckCheck, DoorOpen, Loader2, UtensilsCrossed, X } from "lucide-react";
 
@@ -467,6 +468,14 @@ export function NotificationBell({ initialCount = 0 }: { initialCount?: number }
                 <X size={14} />
               </button>
             </div>
+
+            {/* The switch that decides whether this phone rings when the app is shut.
+                It belongs HERE, and its absence here was the bug: it used to live only
+                on the /employee/notifications page, which staff never open — they tap
+                the bell. So the one control that made the whole push system work sat
+                on a screen nobody visited, and in production not a single device was
+                ever subscribed. It puts itself in front of the person who needs it. */}
+            <PushPrompt />
 
             {/* The scroll viewport. `min-h-0` is what lets a flex child actually be
                 shorter than its content — without it the panel grows past its own
