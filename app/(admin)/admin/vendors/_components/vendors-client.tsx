@@ -152,7 +152,7 @@ function VendorForm({
       )}
 
       {state?.error && (
-        <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
+        <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
           {state.error}
         </p>
       )}
@@ -201,7 +201,7 @@ function VendorAccount({
 
   if (loadError) {
     return (
-      <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
+      <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
         {loadError}
       </p>
     );
@@ -225,8 +225,8 @@ function VendorAccount({
       <div
         className="rounded-xl border px-4 py-3 flex flex-col gap-1.5"
         style={{
-          background: settled ? "#f0fdf4" : "#fff7ed",
-          borderColor: settled ? "#1a7a4a44" : "#f9731644",
+          background: settled ? "var(--color-success-bg)" : "var(--color-warning-bg)",
+          borderColor: settled ? "color-mix(in srgb, var(--color-success) 27%, transparent)" : "color-mix(in srgb, var(--color-warning) 27%, transparent)",
         }}
       >
         <div className="flex items-center justify-between text-sm">
@@ -239,12 +239,12 @@ function VendorAccount({
         </div>
         <div
           className="flex items-center justify-between pt-1.5 border-t"
-          style={{ borderColor: settled ? "#1a7a4a22" : "#f9731633" }}
+          style={{ borderColor: settled ? "color-mix(in srgb, var(--color-success) 13%, transparent)" : "color-mix(in srgb, var(--color-warning) 20%, transparent)" }}
         >
           <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
             {settled ? "Settled" : "We still owe"}
           </span>
-          <span className="text-lg font-medium tabular-nums" style={{ color: settled ? "#1a7a4a" : "#9a3412" }}>
+          <span className="text-lg font-medium tabular-nums" style={{ color: settled ? "var(--color-success)" : "#9a3412" }}>
             {money2(owed)}
           </span>
         </div>
@@ -360,7 +360,7 @@ function VendorAccount({
           )}
 
           {state?.error && (
-            <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
+            <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
               {state.error}
             </p>
           )}
@@ -415,7 +415,7 @@ function VendorAccount({
                   </div>
                   <p
                     className="text-sm font-medium tabular-nums shrink-0"
-                    style={{ color: raises ? "#9a3412" : "#1a7a4a" }}
+                    style={{ color: raises ? "var(--color-warning)" : "#1a7a4a" }}
                   >
                     {raises ? "+" : "−"}{money2(h.amount)}
                   </p>
@@ -609,7 +609,7 @@ export function VendorsClient({
                     <td className="px-4 py-3" style={{ color: "var(--color-ink-mute)" }}>{s.phone ?? "—"}</td>
                     <td
                       className="px-4 py-3 text-right tabular-nums font-medium"
-                      style={{ color: s.credit_balance > 0 ? "#dc2626" : "var(--color-ink-mute)" }}
+                      style={{ color: s.credit_balance > 0 ? "var(--color-danger)" : "var(--color-ink-mute)" }}
                     >
                       {s.credit_balance > 0 ? money2(s.credit_balance) : "—"}
                     </td>
@@ -678,7 +678,7 @@ export function VendorsClient({
                   <div className="text-right shrink-0">
                     <p
                       className="text-sm font-medium tabular-nums"
-                      style={{ color: s.credit_balance > 0 ? "#dc2626" : "var(--color-ink-mute)" }}
+                      style={{ color: s.credit_balance > 0 ? "var(--color-danger)" : "var(--color-ink-mute)" }}
                     >
                       {s.credit_balance > 0 ? money(s.credit_balance) : "Settled"}
                     </p>

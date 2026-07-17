@@ -379,7 +379,7 @@ function PaymentForm({
             </p>
           )}
           {bothFilled && mixedValid && (
-            <p className="text-xs" style={{ color: "#1a7a4a" }}>
+            <p className="text-xs" style={{ color: "var(--color-success)" }}>
               ✓ Amounts match
             </p>
           )}
@@ -399,7 +399,7 @@ function PaymentForm({
           {picked ? (
             <div
               className="rounded-lg border px-4 py-3 flex items-start gap-3"
-              style={{ background: "#f0fdf4", borderColor: "#1a7a4a44" }}
+              style={{ background: "var(--color-success-bg)", borderColor: "color-mix(in srgb, var(--color-success) 27%, transparent)" }}
             >
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate" style={{ color: "var(--color-ink)" }}>
@@ -410,7 +410,7 @@ function PaymentForm({
                   {picked.phone ? ` · ${picked.phone}` : ""}
                 </p>
                 {picked.balance > 0 && (
-                  <p className="text-xs mt-1" style={{ color: "#9a3412" }}>
+                  <p className="text-xs mt-1" style={{ color: "var(--color-warning)" }}>
                     Already owes ₹{picked.balance.toFixed(2)} — this bill will be added to it.
                   </p>
                 )}
@@ -478,7 +478,7 @@ function PaymentForm({
                       </span>
                       <span
                         className="text-sm tabular-nums shrink-0"
-                        style={{ color: m.balance > 0 ? "#dc2626" : "var(--color-ink-mute)" }}
+                        style={{ color: m.balance > 0 ? "var(--color-danger)" : "var(--color-ink-mute)" }}
                       >
                         {m.balance > 0 ? `₹${m.balance.toFixed(0)}` : "settled"}
                       </span>
@@ -639,19 +639,19 @@ function PaymentForm({
               in their hand before committing. */}
           <div
             className="rounded-lg border px-4 py-3 flex flex-col gap-1.5"
-            style={{ background: "#fff7ed", borderColor: "#f9731644" }}
+            style={{ background: "var(--color-warning-bg)", borderColor: "color-mix(in srgb, var(--color-warning) 27%, transparent)" }}
           >
             <div className="flex items-center justify-between text-sm">
-              <span style={{ color: "#9a3412" }}>Payable</span>
-              <span className="tabular" style={{ color: "#9a3412" }}>₹{payable.toFixed(2)}</span>
+              <span style={{ color: "var(--color-warning)" }}>Payable</span>
+              <span className="tabular" style={{ color: "var(--color-warning)" }}>₹{payable.toFixed(2)}</span>
             </div>
             <div className="flex items-center justify-between text-sm">
-              <span style={{ color: "#9a3412" }}>Paying now</span>
-              <span className="tabular" style={{ color: "#9a3412" }}>− ₹{paidNowNum.toFixed(2)}</span>
+              <span style={{ color: "var(--color-warning)" }}>Paying now</span>
+              <span className="tabular" style={{ color: "var(--color-warning)" }}>− ₹{paidNowNum.toFixed(2)}</span>
             </div>
-            <div className="flex items-center justify-between pt-1.5 border-t" style={{ borderColor: "#f9731633" }}>
-              <span className="text-sm font-medium" style={{ color: "#9a3412" }}>Goes on credit</span>
-              <span className="text-lg font-medium tabular" style={{ color: "#9a3412" }}>
+            <div className="flex items-center justify-between pt-1.5 border-t" style={{ borderColor: "color-mix(in srgb, var(--color-warning) 20%, transparent)" }}>
+              <span className="text-sm font-medium" style={{ color: "var(--color-warning)" }}>Goes on credit</span>
+              <span className="text-lg font-medium tabular" style={{ color: "var(--color-warning)" }}>
                 ₹{creditAmount.toFixed(2)}
               </span>
             </div>
@@ -668,7 +668,7 @@ function PaymentForm({
       )}
 
       {errorMsg && (
-        <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
+        <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
           {errorMsg}
         </p>
       )}
@@ -813,10 +813,10 @@ export function SessionClient({
       {!isClosed && canSeePIN && session.customer_pin && (
         <div
           className="flex items-center gap-3 px-4 py-3 rounded-xl border"
-          style={{ background: "#fef9c3", borderColor: "#ca8a0444" }}
+          style={{ background: "var(--color-warning-bg)", borderColor: "color-mix(in srgb, var(--color-warning) 27%, transparent)" }}
         >
           <div className="flex-1">
-            <p className="text-xs font-medium" style={{ color: "#854d0e" }}>
+            <p className="text-xs font-medium" style={{ color: "var(--color-warning)" }}>
               Customer ordering PIN — share with seated customer
             </p>
           </div>
@@ -825,7 +825,7 @@ export function SessionClient({
               <div
                 key={i}
                 className="w-8 h-8 rounded-lg flex items-center justify-center text-base font-bold"
-                style={{ background: "#fff", color: "#854d0e", border: "1px solid #ca8a0444" }}
+                style={{ background: "var(--color-warning-bg)", color: "var(--color-warning)", border: "1px solid color-mix(in srgb, var(--color-warning) 27%, transparent)" }}
               >
                 {d}
               </div>
@@ -939,7 +939,7 @@ export function SessionClient({
                 type="button"
                 disabled={forceClosing}
                 className="w-full rounded-xl border py-3 text-sm font-medium transition-colors disabled:opacity-60"
-                style={{ borderColor: "#ef444444", color: "#dc2626", background: "#fff0f0" }}
+                style={{ borderColor: "color-mix(in srgb, var(--color-danger) 27%, transparent)", color: "var(--color-danger)", background: "var(--color-danger-bg)" }}
                 onClick={() => {
                   const msg = !hasOrders
                     ? "Deactivate this table? It has no orders and will return to Available immediately."
@@ -956,7 +956,7 @@ export function SessionClient({
                 {forceClosing ? "Closing…" : !hasOrders ? "Deactivate table" : "Force close session"}
               </button>
               {forceError && (
-                <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
+                <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
                   {forceError}
                 </p>
               )}
@@ -968,7 +968,7 @@ export function SessionClient({
       {isClosed && (
         <div
           className="rounded-xl border px-4 py-3 text-center text-sm"
-          style={{ borderColor: "#1a7a4a44", background: "#f0fdf4", color: "#1a7a4a" }}
+          style={{ borderColor: "color-mix(in srgb, var(--color-success) 27%, transparent)", background: "var(--color-success-bg)", color: "var(--color-success)" }}
         >
           Session closed
         </div>

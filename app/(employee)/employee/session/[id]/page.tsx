@@ -139,9 +139,9 @@ export default async function SessionPage({
         <span
           className="text-xs px-2 py-0.5 rounded-full border"
           style={{
-            color: session.status === "active" ? "#1a7a4a" : "var(--color-ink-mute)",
-            borderColor: session.status === "active" ? "#1a7a4a44" : "var(--color-hairline)",
-            background: session.status === "active" ? "#f0fdf4" : "transparent",
+            color: session.status === "active" ? "var(--color-success)" : "var(--color-ink-mute)",
+            borderColor: session.status === "active" ? "color-mix(in srgb, var(--color-success) 27%, transparent)" : "var(--color-hairline)",
+            background: session.status === "active" ? "var(--color-success-bg)" : "transparent",
           }}
         >
           {session.status}

@@ -111,9 +111,9 @@ function WorkstationCard({
           type="button"
           className="text-xs px-2 py-1 rounded-md border"
           style={{
-            color: w.is_active ? "#1a7a4a" : "var(--color-ink-mute)",
-            borderColor: w.is_active ? "#1a7a4a44" : "var(--color-hairline)",
-            background: w.is_active ? "#f0fdf4" : "transparent",
+            color: w.is_active ? "var(--color-success)" : "var(--color-ink-mute)",
+            borderColor: w.is_active ? "color-mix(in srgb, var(--color-success) 27%, transparent)" : "var(--color-hairline)",
+            background: w.is_active ? "var(--color-success-bg)" : "transparent",
           }}
           onClick={() =>
             startToggle(async () => {

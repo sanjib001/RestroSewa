@@ -82,8 +82,8 @@ function CustomerCard({
       onClick={onOpen}
       className="w-full rounded-xl border px-4 py-3 text-left transition-colors"
       style={{
-        background: highlight ? "#fff7ed" : "var(--color-canvas)",
-        borderColor: highlight ? "#f97316" : "var(--color-hairline)",
+        background: highlight ? "var(--color-warning-bg)" : "var(--color-canvas)",
+        borderColor: highlight ? "var(--color-warning)" : "var(--color-hairline)",
         borderWidth: highlight ? 1.5 : 1,
         opacity: settled && !highlight ? 0.7 : 1,
       }}
@@ -218,7 +218,7 @@ function CustomerDetailModal({
 
         <div className="px-4 py-4 max-h-[75vh] overflow-y-auto flex flex-col gap-4">
           {loadError && (
-            <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
+            <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
               {loadError}
             </p>
           )}
@@ -235,8 +235,8 @@ function CustomerDetailModal({
               <div
                 className="rounded-xl border px-4 py-3 flex flex-col gap-1.5"
                 style={{
-                  background: settled ? "#f0fdf4" : "#fff7ed",
-                  borderColor: settled ? "#1a7a4a44" : "#f9731644",
+                  background: settled ? "var(--color-success-bg)" : "var(--color-warning-bg)",
+                  borderColor: settled ? "color-mix(in srgb, var(--color-success) 27%, transparent)" : "color-mix(in srgb, var(--color-warning) 27%, transparent)",
                 }}
               >
                 <div className="flex items-center justify-between text-sm">
@@ -253,14 +253,14 @@ function CustomerDetailModal({
                 </div>
                 <div
                   className="flex items-center justify-between pt-1.5 border-t"
-                  style={{ borderColor: settled ? "#1a7a4a22" : "#f9731633" }}
+                  style={{ borderColor: settled ? "color-mix(in srgb, var(--color-success) 13%, transparent)" : "color-mix(in srgb, var(--color-warning) 20%, transparent)" }}
                 >
                   <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
                     {settled ? "Settled" : "Outstanding"}
                   </span>
                   <span
                     className="text-lg font-medium tabular-nums"
-                    style={{ color: settled ? "#1a7a4a" : "#9a3412" }}
+                    style={{ color: settled ? "var(--color-success)" : "#9a3412" }}
                   >
                     {money2(detail.balance)}
                   </span>
@@ -383,7 +383,7 @@ function CustomerDetailModal({
                   {state?.error && (
                     <p
                       className="text-sm rounded-md px-3 py-2"
-                      style={{ color: "var(--color-ruby)", background: "#fff0f4" }}
+                      style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}
                     >
                       {state.error}
                     </p>
@@ -489,7 +489,7 @@ function CustomerDetailModal({
                             </p>
                           )}
                         </div>
-                        <p className="text-sm font-medium tabular-nums shrink-0" style={{ color: "#1a7a4a" }}>
+                        <p className="text-sm font-medium tabular-nums shrink-0" style={{ color: "var(--color-success)" }}>
                           {money2(p.amount)}
                         </p>
                       </div>
@@ -618,9 +618,11 @@ export function CreditsView({
               type="button"
               onClick={() => setStatus(f.key)}
               className="shrink-0 text-sm px-3 py-1.5 rounded-full border transition-colors"
+              // Selected filter → Credits' indigo. Constant indigo FILL (not the flipping accent),
+              // so the white label stays readable in dark where the accent goes light.
               style={{
-                borderColor: active ? "var(--color-primary)" : "var(--color-hairline)",
-                background: active ? "var(--color-primary)" : "var(--color-canvas)",
+                borderColor: active ? "var(--fill-indigo)" : "var(--color-hairline)",
+                background: active ? "var(--fill-indigo)" : "var(--color-canvas)",
                 color: active ? "#fff" : "var(--color-ink)",
               }}
             >

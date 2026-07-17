@@ -169,7 +169,7 @@ function ProductForm({ product, onDone }: { product?: StockRow; onDone: () => vo
       )}
 
       {state?.error && (
-        <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
+        <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
           {state.error}
         </p>
       )}
@@ -321,14 +321,14 @@ function DeductForm({
         <div
           className="rounded-lg border px-4 py-2.5 flex items-center justify-between text-sm"
           style={{
-            background: after < 0 ? "#fff7ed" : "var(--color-canvas-soft)",
-            borderColor: after < 0 ? "#f9731644" : "var(--color-hairline)",
+            background: after < 0 ? "var(--color-warning-bg)" : "var(--color-canvas-soft)",
+            borderColor: after < 0 ? "color-mix(in srgb, var(--color-warning) 27%, transparent)" : "var(--color-hairline)",
           }}
         >
           <span style={{ color: "var(--color-ink-mute)" }}>Stock after this</span>
           <span
             className="tabular-nums font-medium"
-            style={{ color: after <= 0 ? "#dc2626" : "var(--color-ink)" }}
+            style={{ color: after <= 0 ? "var(--color-danger)" : "var(--color-ink)" }}
           >
             {qty(after)} {unit}
           </span>
@@ -336,14 +336,14 @@ function DeductForm({
       )}
 
       {after !== undefined && after < 0 && (
-        <p className="text-xs" style={{ color: "#9a3412" }}>
+        <p className="text-xs" style={{ color: "var(--color-warning)" }}>
           This deducts more than you have on hand. It will be recorded anyway — the negative
           balance tells you the count is off somewhere.
         </p>
       )}
 
       {state?.error && (
-        <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
+        <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
           {state.error}
         </p>
       )}
@@ -429,10 +429,10 @@ function ProductLinks({
       {links.length === 0 && !adding ? (
         <div
           className="rounded-lg border px-3 py-2.5 flex items-start gap-2"
-          style={{ background: "#fff7ed", borderColor: "#f9731644" }}
+          style={{ background: "var(--color-warning-bg)", borderColor: "color-mix(in srgb, var(--color-warning) 27%, transparent)" }}
         >
-          <TriangleAlert size={14} className="mt-0.5 shrink-0" style={{ color: "#9a3412" }} />
-          <p className="text-xs" style={{ color: "#9a3412" }}>
+          <TriangleAlert size={14} className="mt-0.5 shrink-0" style={{ color: "var(--color-warning)" }} />
+          <p className="text-xs" style={{ color: "var(--color-warning)" }}>
             No menu item uses this product, so selling never deducts it. Add one — the same
             product can feed as many menu items as you like.
           </p>
@@ -536,7 +536,7 @@ function ProductLinks({
           </div>
 
           {state?.error && (
-            <p className="text-xs rounded-md px-2 py-1.5" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
+            <p className="text-xs rounded-md px-2 py-1.5" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
               {state.error}
             </p>
           )}
@@ -714,7 +714,7 @@ function ProductDetailView({
   }, [onChanged]);
 
   if (error) {
-    return <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>{error}</p>;
+    return <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>{error}</p>;
   }
   if (!detail) {
     return (
@@ -866,10 +866,10 @@ function MenuLinks({ canManage, onOpenProduct }: { canManage: boolean; onOpenPro
       {unlinked > 0 && (
         <div
           className="rounded-lg border px-3 py-2.5 flex items-start gap-2"
-          style={{ background: "#fff7ed", borderColor: "#f9731644" }}
+          style={{ background: "var(--color-warning-bg)", borderColor: "color-mix(in srgb, var(--color-warning) 27%, transparent)" }}
         >
-          <TriangleAlert size={14} className="mt-0.5 shrink-0" style={{ color: "#9a3412" }} />
-          <p className="text-xs" style={{ color: "#9a3412" }}>
+          <TriangleAlert size={14} className="mt-0.5 shrink-0" style={{ color: "var(--color-warning)" }} />
+          <p className="text-xs" style={{ color: "var(--color-warning)" }}>
             {unlinked} menu item{unlinked !== 1 ? "s" : ""} deduct{unlinked === 1 ? "s" : ""} nothing
             when sold. Open a product to link {unlinked !== 1 ? "them" : "it"}.
           </p>
@@ -890,7 +890,7 @@ function MenuLinks({ canManage, onOpenProduct }: { canManage: boolean; onOpenPro
                   {l.menu_item_name}
                 </p>
                 {!tracked && (
-                  <span className="text-xs shrink-0" style={{ color: "#9a3412" }}>Deducts nothing</span>
+                  <span className="text-xs shrink-0" style={{ color: "var(--color-warning)" }}>Deducts nothing</span>
                 )}
               </div>
 
@@ -1062,10 +1062,10 @@ export function StockClient({
           type="button"
           onClick={() => setLinksOpen(true)}
           className="w-full rounded-lg border px-3 py-2.5 flex items-start gap-2 mb-4 text-left"
-          style={{ background: "#fff7ed", borderColor: "#f9731644" }}
+          style={{ background: "var(--color-warning-bg)", borderColor: "color-mix(in srgb, var(--color-warning) 27%, transparent)" }}
         >
-          <TriangleAlert size={14} className="mt-0.5 shrink-0" style={{ color: "#9a3412" }} />
-          <p className="text-xs" style={{ color: "#9a3412" }}>
+          <TriangleAlert size={14} className="mt-0.5 shrink-0" style={{ color: "var(--color-warning)" }} />
+          <p className="text-xs" style={{ color: "var(--color-warning)" }}>
             <span className="font-medium">{summary.unlinkedMenuItems} menu item
             {summary.unlinkedMenuItems !== 1 ? "s aren't" : " isn't"} linked to a product.</span>{" "}
             Selling {summary.unlinkedMenuItems !== 1 ? "them" : "it"} won&apos;t change stock. Tap to review.
@@ -1175,7 +1175,7 @@ export function StockClient({
                         </span>
                         <StatusPill status={p.status} />
                         {p.link_count === 0 ? (
-                          <span className="text-[10px]" style={{ color: "#9a3412" }}>unlinked</span>
+                          <span className="text-[10px]" style={{ color: "var(--color-warning)" }}>unlinked</span>
                         ) : (
                           <span className="text-[10px]" style={{ color: "var(--color-ink-mute)" }}>
                             {p.link_count} menu item{p.link_count !== 1 ? "s" : ""}
@@ -1184,14 +1184,14 @@ export function StockClient({
                       </div>
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums" style={{ color: "var(--color-ink-mute)" }}>{qty(p.opening)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums" style={{ color: p.purchased > 0 ? "#1a7a4a" : "var(--color-ink-mute)" }}>
+                    <td className="px-4 py-3 text-right tabular-nums" style={{ color: p.purchased > 0 ? "var(--color-success)" : "var(--color-ink-mute)" }}>
                       {p.purchased > 0 ? `+${qty(p.purchased)}` : "—"}
                     </td>
                     {/* Used = what was ACTUALLY consumed: POS sales (net of anything
                         rejected or cancelled today) + manual deductions, as ONE
                         total. The split lives in the product history, not here —
                         this column is a summary. */}
-                    <td className="px-4 py-3 text-right tabular-nums" style={{ color: p.used > 0 ? "#dc2626" : "var(--color-ink-mute)" }}>
+                    <td className="px-4 py-3 text-right tabular-nums" style={{ color: p.used > 0 ? "var(--color-danger)" : "var(--color-ink-mute)" }}>
                       {p.used > 0 ? `−${qty(p.used)}` : "—"}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums font-medium" style={{ color: STOCK_STATUS_COLOR[p.status] }}>
@@ -1273,10 +1273,10 @@ export function StockClient({
 
                   <div className="flex items-center gap-3 mt-2 text-xs tabular-nums" style={{ color: "var(--color-ink-mute)" }}>
                     <span>Yest {qty(p.opening)}</span>
-                    <span style={{ color: p.purchased > 0 ? "#1a7a4a" : undefined }}>
+                    <span style={{ color: p.purchased > 0 ? "var(--color-success)" : undefined }}>
                       Purch {p.purchased > 0 ? `+${qty(p.purchased)}` : "—"}
                     </span>
-                    <span style={{ color: p.used > 0 ? "#dc2626" : undefined }}>
+                    <span style={{ color: p.used > 0 ? "var(--color-danger)" : undefined }}>
                       Used {p.used > 0 ? `−${qty(p.used)}` : "—"}
                     </span>
                   </div>

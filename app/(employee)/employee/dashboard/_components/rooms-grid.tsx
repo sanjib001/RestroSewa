@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { memo, useActionState, useCallback, useEffect, useState, useTransition } from "react";
-import { checkInRoom, getRoomsOverview } from "@/app/actions/rooms";
+import { checkInRoom, getRoomsOverview, markRoomClean } from "@/app/actions/rooms";
 import type { RoomOverview } from "@/app/actions/rooms";
 import { useRealtime } from "@/lib/realtime/use-realtime";
+import { STATUS_STYLE } from "@/lib/status-colors";
+import { SECTION_ACCENT } from "@/lib/section-colors";
+import { CountPill } from "@/components/ui/count-pill";
 import { Button } from "@/components/ui/button";
 import { formatShort } from "@/lib/format-time";
-import { BedDouble, Clock, LogIn, Plus, Receipt, User, Users, UtensilsCrossed, X } from "lucide-react";
+import { BedDouble, Clock, LogIn, Plus, Receipt, Sparkles, User, Users, UtensilsCrossed, X } from "lucide-react";
 
 const rupee = (n: number) => "₹" + Number(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
@@ -41,12 +44,9 @@ function useNow(everyMs = 60_000): number | null {
   return now;
 }
 
-const STATUS: Record<RoomOverview["status"], { label: string; color: string; soft: string }> = {
-  available: { label: "Available", color: "#1a7a4a", soft: "#f0fdf4" },
-  occupied: { label: "Occupied", color: "#4f46e5", soft: "#eef2ff" },
-  cleaning: { label: "Cleaning", color: "#b45309", soft: "#fff7ed" },
-  maintenance: { label: "Maintenance", color: "#6b7280", soft: "#f9fafb" },
-};
+// Shared with the tables grid and the admin rooms page — one palette, so "orange" means
+// "needs cleaning" everywhere in the app. See lib/status-colors.ts.
+const STATUS = STATUS_STYLE;
 
 // ─── Check in ────────────────────────────────────────────────────────────────
 
@@ -173,30 +173,39 @@ function CheckInModal({ room, onClose }: { room: RoomOverview; onClose: () => vo
 
 // `memo` so a refetch re-renders only the cards whose data actually moved —
 // checking one guest in shouldn't repaint every other room's countdown.
-const RoomCard = memo(function RoomCard({ room, canCheckIn, onCheckIn }: {
+const RoomCard = memo(function RoomCard({ room, canCheckIn, onCheckIn, onError }: {
   room: RoomOverview;
   canCheckIn: boolean;
   onCheckIn: () => void;
+  onError: (msg: string) => void;
 }) {
   const s = STATUS[room.status];
   const stay = room.stay;
   const now = useNow();
+  const [cleaning, startClean] = useTransition();
 
   return (
     <div
       className="rounded-xl border flex flex-col overflow-hidden"
-      style={{ background: "var(--color-canvas)", borderColor: stay ? s.color + "55" : "var(--color-hairline)" }}
+      // Was `s.color + "55"` — a hex-alpha suffix. STATUS_STYLE colours are var() references
+      // now (so they flip in dark mode), and "var(--st-occupied)55" is not a colour. The
+      // status tint on the header row carries the meaning; the border just needs to agree.
+      style={{ background: "var(--color-canvas)", borderColor: stay ? s.color : "var(--color-hairline)" }}
     >
       <div className="flex items-center gap-2 px-4 py-2.5 border-b" style={{ borderColor: "var(--color-hairline)" }}>
-        <span className="text-base font-medium" style={{ color: "var(--color-ink)" }}>
+        {/* The teal bed mark is what separates a room card from a table card at a glance —
+            the status pill to its right stays on the shared palette. */}
+        <BedDouble aria-hidden size={15} strokeWidth={1.9} style={{ color: SECTION_ACCENT.rooms.color }} />
+        <span className="text-lg font-medium" style={{ color: "var(--color-ink)" }}>
           {room.number}
         </span>
-        <span className="text-xs truncate flex-1" style={{ color: "var(--color-ink-mute)" }}>
+        <span className="text-sm truncate flex-1" style={{ color: "var(--color-ink-mute)" }}>
           {room.type_name}
         </span>
         <span
-          className="text-xs px-2 py-0.5 rounded-full shrink-0"
-          style={{ background: s.soft, color: s.color }}
+          // Bordered, like CountPill — a bare tint had no edge on the white canvas.
+          className="text-sm px-2 py-0.5 rounded-full shrink-0 border"
+          style={{ background: s.soft, color: s.color, borderColor: s.color }}
         >
           {s.label}
         </span>
@@ -252,7 +261,7 @@ const RoomCard = memo(function RoomCard({ room, canCheckIn, onCheckIn }: {
               ) : stay.items_pending > 0 ? (
                 <span
                   className="text-xs px-1.5 py-0.5 rounded-full font-medium"
-                  style={{ background: "#fff7ed", color: "#b45309" }}
+                  style={{ background: "var(--color-warning-bg)", color: "var(--color-warning)" }}
                 >
                   {stay.items_pending} pending
                 </span>
@@ -331,6 +340,25 @@ const RoomCard = memo(function RoomCard({ room, canCheckIn, onCheckIn }: {
               <Receipt size={13} /> Settle old session
             </Button>
           </Link>
+        ) : room.status === "cleaning" ? (
+          // The guest has gone but the room isn't sellable yet. "Check in" is deliberately
+          // NOT offered here — the server refuses it (ROOM_NEEDS_CLEANING), so showing the
+          // button would only promise something that fails. Releasing it is the one action.
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={cleaning}
+            onClick={() =>
+              startClean(async () => {
+                const r = await markRoomClean(room.id);
+                if (r && "error" in r) onError(r.error);
+              })
+            }
+            className="w-full flex items-center justify-center gap-1.5"
+            style={{ color: STATUS_STYLE.cleaning.color, borderColor: STATUS_STYLE.cleaning.color }}
+          >
+            <Sparkles size={13} /> {cleaning ? "Marking clean…" : "Mark as Clean"}
+          </Button>
         ) : canCheckIn && room.status !== "maintenance" ? (
           <Button
             type="button"
@@ -357,6 +385,7 @@ export function RoomsGrid({
 }) {
   const [rooms, setRooms] = useState(initial);
   const [checkingIn, setCheckingIn] = useState<RoomOverview | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
   // Refetches only the rooms. This was `router.refresh()` (via RealtimeRefresh),
@@ -371,8 +400,12 @@ export function RoomsGrid({
 
   useRealtime(["tables", "orders"], resync);
 
+  // Stable identity, so memoised cards aren't invalidated on every render.
+  const onError = useCallback((msg: string) => setError(msg), []);
+
   const occupied = rooms.filter((r) => r.stay).length;
   const free = rooms.filter((r) => r.status === "available" && !r.stay).length;
+  const dirty = rooms.filter((r) => r.status === "cleaning").length;
 
   if (rooms.length === 0) {
     return (
@@ -390,11 +423,18 @@ export function RoomsGrid({
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Rooms</p>
-        <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
-          {occupied} occupied · {free} free · {rooms.length} total
+        <p className="text-base font-medium" style={{ color: SECTION_ACCENT.rooms.color }}>Rooms</p>
+        <span className="inline-flex items-center gap-1.5 flex-wrap">
+          {free > 0 && <CountPill n={free} label="free" tone={STATUS_STYLE.available} />}
+          {occupied > 0 && <CountPill n={occupied} label="occupied" tone={STATUS_STYLE.occupied} />}
+          {dirty > 0 && <CountPill n={dirty} label="cleaning" tone={STATUS_STYLE.cleaning} />}
+          <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>{rooms.length} total</span>
         </span>
       </div>
+
+      {error && (
+        <p className="text-xs mb-2" style={{ color: "var(--color-ruby)" }}>{error}</p>
+      )}
 
       <div
         className="grid gap-3"
@@ -405,6 +445,7 @@ export function RoomsGrid({
             key={r.id}
             room={r}
             canCheckIn={canCheckIn}
+            onError={onError}
             onCheckIn={() => setCheckingIn(r)}
           />
         ))}

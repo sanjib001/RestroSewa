@@ -378,10 +378,10 @@ function CheckOutForm({
 
           <div
             className="flex items-baseline justify-between rounded-lg border px-3 py-2"
-            style={{ borderColor: "#b4530944", background: "#fff7ed" }}
+            style={{ borderColor: "color-mix(in srgb, var(--color-warning) 27%, transparent)", background: "var(--color-warning-bg)" }}
           >
-            <span className="text-sm" style={{ color: "#9a3412" }}>Left on credit</span>
-            <span className="text-sm tabular font-medium" style={{ color: "#9a3412" }}>{rupee(owed)}</span>
+            <span className="text-sm" style={{ color: "var(--color-warning)" }}>Left on credit</span>
+            <span className="text-sm tabular font-medium" style={{ color: "var(--color-warning)" }}>{rupee(owed)}</span>
           </div>
         </div>
       )}

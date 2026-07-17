@@ -22,12 +22,25 @@ export type ActionResult = { error: string } | null;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/**
+ * A table's state, DERIVED rather than stored, so "active" can never disagree with the
+ * sessions table. Cleaning is the only fact the table row itself carries.
+ *
+ *   session open        -> active
+ *   else cleaning_since -> cleaning   (bill paid / session closed; awaiting a wipe-down)
+ *   else                -> available
+ */
+export type TableState = "available" | "active" | "cleaning";
+
 export type TableStatus = {
   id: string;
   number: string;
   group_id: string | null;
   session_id: string | null;
   session_opened_at: string | null;
+  state: TableState;
+  /** When it was left dirty — null unless `state` is "cleaning". */
+  cleaning_since: string | null;
 };
 
 export type OrderItemRow = {
@@ -122,7 +135,7 @@ export async function getTableStatusOverview(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("restaurant_tables")
-      .select("id, number, group_id")
+      .select("id, number, group_id, cleaning_since")
       .eq("restaurant_id", restaurantId)
       .eq("is_active", true)
       .order("number"),
@@ -138,6 +151,7 @@ export async function getTableStatusOverview(
     id: string;
     number: string;
     group_id: string | null;
+    cleaning_since: string | null;
   }[];
   const sessions = (sessionsRes.data ?? []) as {
     id: string;
@@ -147,14 +161,54 @@ export async function getTableStatusOverview(
 
   return tables.map((t) => {
     const session = sessions.find((s) => s.table_id === t.id) ?? null;
+    // An open session always wins: if someone re-seated a table that was still marked dirty,
+    // it is plainly in use, and showing it as "cleaning" would hide a live bill.
+    const state: TableState = session ? "active" : t.cleaning_since ? "cleaning" : "available";
     return {
       id: t.id,
       number: t.number,
       group_id: t.group_id,
       session_id: session?.id ?? null,
       session_opened_at: session?.opened_at ?? null,
+      state,
+      cleaning_since: state === "cleaning" ? t.cleaning_since : null,
     };
   });
+}
+
+// ─── Cleaning ────────────────────────────────────────────────────────────────
+// A table parks in "cleaning" automatically when its session closes (the
+// trg_park_table_for_cleaning trigger — see 20260717160000). This is the way out: one tap,
+// back to available.
+//
+// Gated the same way as OPENING a table: staff may only touch tables in their assigned
+// groups. Whoever is trusted to seat a table is trusted to say it's been wiped — anything
+// stricter would leave waiters unable to clear their own section, and tables would pile up
+// dirty waiting for a manager.
+export async function markTableClean(tableId: string): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  const service = createServiceClient();
+
+  const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
+  if (!visibility.seesAll && !visibility.canSeeTable(tableId)) {
+    return { error: "That table isn't in your section." };
+  }
+
+  // Scoped to the caller's restaurant so a stray id can't clear another tenant's table.
+  // Clearing an already-clean table is a no-op, not an error — two staff tapping at once
+  // should both just see a clean table.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("restaurant_tables")
+    .update({ cleaning_since: null })
+    .eq("id", tableId)
+    .eq("restaurant_id", ru.restaurant_id);
+
+  if (error) return { error: "Could not mark the table clean. Please try again." };
+
+  // The UPDATE fires rs_ev_tables, so every other dashboard repaints on its own.
+  revalidatePath("/employee/dashboard");
+  return null;
 }
 
 // ─── Open / Navigate to Session ──────────────────────────────────────────────
@@ -181,6 +235,21 @@ export async function openTableSession(tableId: string) {
 
   if (existing) {
     redirect(`/employee/session/${existing.id}`);
+  }
+
+  // A table still awaiting cleaning can't be seated. The DB refuses this too
+  // (trg_refuse_session_on_dirty_table); checking here is what turns that exception into a
+  // sentence the waiter can act on.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: tbl } = await (service as any)
+    .from("restaurant_tables")
+    .select("cleaning_since")
+    .eq("id", tableId)
+    .eq("restaurant_id", ru.restaurant_id)
+    .maybeSingle();
+
+  if (tbl?.cleaning_since) {
+    return { error: "This table still needs cleaning. Mark it clean before seating anyone." };
   }
 
   // Only "Menu + Ordering (With PIN)" restaurants use a customer ordering PIN.

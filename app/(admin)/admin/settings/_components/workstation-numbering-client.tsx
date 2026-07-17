@@ -99,7 +99,7 @@ export function WorkstationNumberingClient({ workstations }: { workstations: Wor
               {pending ? "Saving…" : "Save"}
             </Button>
             {saved && (
-              <span className="text-sm flex items-center gap-1.5" style={{ color: "#1a7a4a" }}>
+              <span className="text-sm flex items-center gap-1.5" style={{ color: "var(--color-success)" }}>
                 <CheckCircle2 size={15} /> Saved
               </span>
             )}

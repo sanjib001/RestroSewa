@@ -223,10 +223,10 @@ function OpeningForm({ current, onDone }: { current: OpeningBalance; onDone: () 
       {current && (
         <div
           className="rounded-lg border px-3 py-2.5 flex items-start gap-2"
-          style={{ background: "#fff7ed", borderColor: "#f9731644" }}
+          style={{ background: "var(--color-warning-bg)", borderColor: "color-mix(in srgb, var(--color-warning) 27%, transparent)" }}
         >
-          <TriangleAlert size={14} className="mt-0.5 shrink-0" style={{ color: "#9a3412" }} />
-          <p className="text-xs" style={{ color: "#9a3412" }}>
+          <TriangleAlert size={14} className="mt-0.5 shrink-0" style={{ color: "var(--color-warning)" }} />
+          <p className="text-xs" style={{ color: "var(--color-warning)" }}>
             Changing this re-bases every balance from the new start date. Only adjust it if the
             original figures were wrong.
           </p>
@@ -234,7 +234,7 @@ function OpeningForm({ current, onDone }: { current: OpeningBalance; onDone: () 
       )}
 
       {state?.error && (
-        <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
+        <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
           {state.error}
         </p>
       )}
@@ -384,10 +384,10 @@ export function FinanceClient({
       {!report.hasOpening && (
         <div
           className="rounded-lg border px-3 py-2.5 flex items-start gap-2 mt-4"
-          style={{ background: "#fff7ed", borderColor: "#f9731644" }}
+          style={{ background: "var(--color-warning-bg)", borderColor: "color-mix(in srgb, var(--color-warning) 27%, transparent)" }}
         >
-          <TriangleAlert size={14} className="mt-0.5 shrink-0" style={{ color: "#9a3412" }} />
-          <p className="text-xs" style={{ color: "#9a3412" }}>
+          <TriangleAlert size={14} className="mt-0.5 shrink-0" style={{ color: "var(--color-warning)" }} />
+          <p className="text-xs" style={{ color: "var(--color-warning)" }}>
             <span className="font-medium">No opening balance set.</span> Balances below start from
             zero and count every transaction ever recorded.
             {canManage && " Set your opening balance so they reflect real money."}

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ListOrdered, Banknote, LayoutGrid, BedDouble, BookOpen, ChevronDown, HandCoins, ShoppingBag } from "lucide-react";
+import { accentOf } from "@/lib/section-colors";
 
 export type SectionKey = "orders" | "tables" | "walkins" | "rooms" | "sales" | "credits" | "menu";
 
@@ -15,7 +16,11 @@ export type DashboardSection = {
   bare?: boolean;
 };
 
-const SECTION_ICON: Record<SectionKey, React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
+// `style` is part of the contract now: the quick-nav tints each icon with its section accent.
+const SECTION_ICON: Record<
+  SectionKey,
+  React.ComponentType<{ size?: number; strokeWidth?: number; style?: React.CSSProperties }>
+> = {
   orders: ListOrdered,
   tables: LayoutGrid,
   walkins: ShoppingBag,
@@ -64,12 +69,25 @@ function SectionCard({ section, className }: { section: DashboardSection; classN
   // running. Uses the grid-rows 0fr→1fr trick for a smooth animation.
   const [open, setOpen] = useState(true);
   const Icon = SECTION_ICON[section.key];
+  const accent = accentOf(section.key);
 
   return (
     <section
       id={`sec-${section.key}`}
       className={`rounded-2xl border overflow-hidden ${className ?? ""}`}
-      style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)", scrollMarginTop: 112 }}
+      // The accent runs along the TOP and LEFT edges. Both live on the section's own border
+      // rather than an inner element, so the colour follows the rounded corner cleanly instead
+      // of butting against it. The other two edges stay hairline — a full coloured outline
+      // would box the card in and fight the content.
+      style={{
+        background: "var(--color-canvas)",
+        borderColor: "var(--color-hairline)",
+        borderTopColor: accent.color,
+        borderTopWidth: 2,
+        borderLeftColor: accent.color,
+        borderLeftWidth: 3,
+        scrollMarginTop: 112,
+      }}
     >
       <button
         type="button"
@@ -78,19 +96,20 @@ function SectionCard({ section, className }: { section: DashboardSection; classN
         className="w-full flex items-center gap-3 px-4 sm:px-5 py-3.5 text-left transition-colors hover:bg-canvas-soft"
       >
         <span
-          className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 transition-transform duration-200"
-          style={{ background: "var(--color-canvas-soft)", color: "var(--color-primary)" }}
+          className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 transition-transform duration-200"
+          style={{ background: accent.soft, color: accent.color }}
         >
-          <Icon size={18} strokeWidth={1.6} />
+          <Icon size={20} strokeWidth={1.9} />
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block text-base font-medium" style={{ color: "var(--color-ink)" }}>{section.title}</span>
+          <span className="block text-lg font-medium" style={{ color: accent.color }}>{section.title}</span>
           {section.subtitle && (
-            <span className="block text-xs truncate" style={{ color: "var(--color-ink-mute)" }}>{section.subtitle}</span>
+            <span className="block text-sm truncate" style={{ color: "var(--color-ink-mute)" }}>{section.subtitle}</span>
           )}
         </span>
         <ChevronDown
-          size={18}
+          size={20}
+          strokeWidth={2}
           className="shrink-0 transition-transform duration-300"
           style={{ color: "var(--color-ink-mute)", transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}
         />
@@ -168,14 +187,20 @@ export function StaffDashboard({
           <div className="max-w-6xl mx-auto flex gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
             {sections.map((s) => {
               const Icon = SECTION_ICON[s.key];
+              const accent = accentOf(s.key);
               return (
                 <button
                   key={s.key}
                   type="button"
                   onClick={() => jump(s.key)}
-                  className="inline-flex items-center gap-1.5 shrink-0 text-sm px-3 py-1.5 rounded-full border border-hairline bg-canvas text-ink transition-all duration-200 hover:border-primary/40 active:scale-95 shadow-xs"
+                  // Tinted rather than filled: eight saturated pills in a row would fight each
+                  // other and the content below. The icon carries the hue, the label stays ink.
+                  className="inline-flex items-center gap-1.5 shrink-0 text-sm px-3 py-2 rounded-full border bg-canvas text-ink transition-all duration-200 active:scale-95 shadow-xs"
+                  // Borders were accent.soft — a 50-tier tint that all but vanished against the
+                  // white canvas. The accent at full strength gives the chip a real edge.
+                  style={{ borderColor: accent.color }}
                 >
-                  <Icon size={14} strokeWidth={1.6} />
+                  <Icon size={16} strokeWidth={1.9} style={{ color: accent.color }} />
                   {s.title}
                 </button>
               );

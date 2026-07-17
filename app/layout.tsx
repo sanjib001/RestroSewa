@@ -6,9 +6,12 @@ import { APPLE_SPLASH } from "@/lib/pwa/apple-splash";
 import { cookies } from "next/headers";
 import { ThemeSync } from "@/components/ui/theme-sync";
 
+// 500/600 are loaded because 54 files use font-medium/font-semibold. Without the real cuts the
+// browser synthesises them — smeared, slightly-too-wide letterforms that read as blurry on the
+// dense dashboard tables. Body stays 300 (see globals.css); these are for emphasis only.
 const inter = Inter({
   subsets: ["latin"],
-  weight: ["300", "400"],
+  weight: ["300", "400", "500", "600"],
   variable: "--font-inter",
   display: "swap",
 });

@@ -173,7 +173,7 @@ export function MenuBrowser({
                   key={item.id}
                   className="rounded-xl border p-3 flex flex-col gap-2"
                   style={{
-                    background: qty > 0 ? "#f0f0ff" : "var(--color-canvas)",
+                    background: qty > 0 ? "var(--color-canvas-soft)" : "var(--color-canvas)",
                     borderColor: qty > 0 ? "var(--color-primary)" : "var(--color-hairline)",
                   }}
                 >
@@ -269,7 +269,7 @@ export function MenuBrowser({
                     className="flex items-center gap-2 px-3 py-2 rounded-xl border"
                     style={{
                       borderColor: inCart > 0 ? "var(--color-primary)" : "var(--color-hairline)",
-                      background: inCart > 0 ? "#f0f0ff" : "transparent",
+                      background: inCart > 0 ? "var(--color-canvas-soft)" : "transparent",
                     }}
                   >
                     <span className="flex-1 text-sm" style={{ color: "var(--color-ink)" }}>

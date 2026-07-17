@@ -2,7 +2,20 @@
 
 @variant dark (&:where(.dark, .dark *));
 
-@theme inline {
+/*
+ * DO NOT add `inline` to this @theme block.
+ *
+ * `@theme inline` bakes each token's *value* into the utility, so `--color-ink: #0d253d`
+ * compiles to `.text-ink{color:#0d253d}` — a frozen literal the `.dark` block below can
+ * never reach. Every dark override for primary/ink/canvas/hairline was silently inert
+ * until this word was removed. Plain `@theme` emits `.text-ink{color:var(--color-ink)}`,
+ * which `.dark` overrides correctly.
+ *
+ * `inline` is only right when every token is itself a `var()` reference (shadcn's pattern —
+ * see the semantic colors below, which were the only ones done that way and so the only
+ * ones that ever flipped). We keep literals here, so no `inline`.
+ */
+@theme {
   /* ── Colors ──────────────────────────────────────────────── */
   --color-primary: #533afd;
   --color-primary-deep: #4434d4;
@@ -11,17 +24,26 @@
   --color-primary-subdued: #b9b9f9;
   --color-brand-dark: #1c1e54;
 
+  /* Light mode carried a washed-out feel that dark didn't, and it came from the two
+     secondary inks rather than from --color-ink (already ~14:1 on white).
+     --color-ink-mute was #64748d = 4.74:1 — technically AA, but only just, and it's used for
+     nearly every label and subtitle on the dashboard. Now ~6.7:1: still clearly secondary,
+     but readable at 12-14px on a bright screen in a bright room. */
   --color-ink: #0d253d;
-  --color-ink-secondary: #273951;
-  --color-ink-mute: #64748d;
-  --color-ink-mute-2: #61718a;
+  --color-ink-secondary: #1e2f45;
+  --color-ink-mute: #4d5b74;
+  --color-ink-mute-2: #4d5b74;
 
   --color-canvas: #ffffff;
   --color-canvas-soft: #f6f9fc;
   --color-canvas-cream: #f5e9d4;
 
-  --color-hairline: #e3e8ee;
-  --color-hairline-input: #a8c3de;
+  /* Every card, section, divider and grid line in light mode is one of these. #e3e8ee sat so
+     close to the white canvas that surfaces had no edge — the single biggest reason light felt
+     flat next to dark, where the borders read clearly against the dark canvas. Stepped down
+     enough to define a card without drawing a hard box around it. */
+  --color-hairline: #d5dde7;
+  --color-hairline-input: #8fa6c2;
 
   --color-ruby: #ea2261;
   --color-magenta: #f96bee;
@@ -67,16 +89,10 @@
   --radius: 0.375rem;
 }
 
-/* ── Spacing reference (plain CSS vars, not Tailwind tokens) ─ */
 :root {
-  --ds-spacing-xxs: 2px;
-  --ds-spacing-xs: 4px;
-  --ds-spacing-sm: 8px;
-  --ds-spacing-md: 12px;
-  --ds-spacing-lg: 16px;
-  --ds-spacing-xl: 24px;
-  --ds-spacing-xxl: 32px;
-  --ds-spacing-huge: 64px;
+  /* The --ds-spacing-* scale that used to live here was removed: it sat outside @theme, so it
+     generated no utilities, and nothing referenced it in four months. Tailwind's own spacing
+     scale (p-2, gap-3, …) is the source of truth for spacing. */
 
   /* Semantic Default Color Values */
   --color-success-val: #16a34a;
@@ -87,6 +103,68 @@
   --color-danger-bg-val: #fef2f2;
   --color-info-val: #2563eb;
   --color-info-bg-val: #eff6ff;
+
+  /* ── Solid fills (behind WHITE text) ──────────────────────────────────────────
+   * These do NOT flip — they are the ONE case where a colour must stay constant across
+   * themes. The --sec- and --st- accents are foreground colours: 700-tier in light, 400-tier
+   * (bright) in dark, so they read as text/icons on the canvas. Used as a FILL behind white
+   * text they invert in dark — white on a bright #4ade80 green is unreadable. A filled badge/
+   * tile/active-card therefore uses these fixed 700-tier fills instead, where white clears AA
+   * on both a light and a dark card. There is deliberately no .dark override below.
+   */
+  --fill-amber: #b45309;
+  --fill-green: #15803d;
+  --fill-blue: #1d4ed8;
+  --fill-indigo: #4338ca;
+  --fill-purple: #7e22ce;
+
+  /* ── Dashboard accents ────────────────────────────────────────────────────────
+   * Deliberately NOT in @theme. These are applied dynamically — the section a card
+   * belongs to is data, so the colour arrives as `style={{ color: "var(--sec-tables)" }}`
+   * and never as a literal class name. Tailwind v4 prunes theme vars that no *generated
+   * utility* references, and it cannot see a var() inside a TSX style object — so putting
+   * these in @theme would silently drop them. Plain :root/.dark is always emitted.
+   * (`bg-${x}` doesn't work either: v4 has no dynamic class generation.)
+   *
+   * Light values are 700-tier for >=4.5:1 on white; dark are 400-tier for the same on
+   * #0f111a. `-soft` is a 50-tier tint in light and a 14% wash of the accent in dark, so a
+   * tinted panel never becomes a light slab on a dark page.
+   */
+  --sec-orders: #b45309;         --sec-orders-soft: #fff7ed;
+  --sec-tables: #1d4ed8;         --sec-tables-soft: #eff6ff;
+  --sec-walkins: #7e22ce;        --sec-walkins-soft: #faf5ff;
+  --sec-rooms: #0f766e;          --sec-rooms-soft: #f0fdfa;
+  --sec-sales: #15803d;          --sec-sales-soft: #f0fdf4;
+  --sec-credits: #4338ca;        --sec-credits-soft: #eef2ff;
+  --sec-menu: #047857;           --sec-menu-soft: #ecfdf5;
+  --sec-notifications: #b91c1c;  --sec-notifications-soft: #fef2f2;
+
+  /* ── Status ───────────────────────────────────────────────────────────────────
+   * ONE meaning per colour, shared by tables, walk-ins and rooms: a cashier scanning 55
+   * cards reads "blue = in use" without asking which section they're in. Sections are told
+   * apart by their chrome and icon, not by re-colouring status.
+   */
+  --st-available: #15803d;    --st-available-soft: #f0fdf4;
+  --st-occupied: #1d4ed8;     --st-occupied-soft: #eff6ff;
+  --st-cleaning: #b45309;     --st-cleaning-soft: #fff7ed;
+  --st-maintenance: #b91c1c;  --st-maintenance-soft: #fef2f2;
+
+  /* ── Menu category hues ───────────────────────────────────────────────────────
+   * Categories are free-text rows with no colour column, so a hue is resolved from the
+   * name (or the id, as a stable fallback) at render time — see lib/category-colors.ts.
+   */
+  --cat-orange: #c2410c;  --cat-orange-soft: #fff7ed;
+  --cat-green: #15803d;   --cat-green-soft: #f0fdf4;
+  --cat-yellow: #a16207;  --cat-yellow-soft: #fefce8;
+  --cat-blue: #1d4ed8;    --cat-blue-soft: #eff6ff;
+  --cat-pink: #be185d;    --cat-pink-soft: #fdf2f8;
+  --cat-brown: #78350f;   --cat-brown-soft: #fdf6ec;
+  --cat-purple: #7e22ce;  --cat-purple-soft: #faf5ff;
+  --cat-cyan: #0e7490;    --cat-cyan-soft: #ecfeff;
+  --cat-red: #b91c1c;     --cat-red-soft: #fef2f2;
+  --cat-teal: #0f766e;    --cat-teal-soft: #f0fdfa;
+  --cat-indigo: #4338ca;  --cat-indigo-soft: #eef2ff;
+  --cat-lime: #4d7c0f;    --cat-lime-soft: #f7fee7;
 }
 
 .dark {
@@ -96,6 +174,10 @@
   --color-primary-press: #4f46e5;
   --color-primary-soft: #a5b4fc;
   --color-primary-subdued: #1e1b4b;
+  /* The navigation bar (staff top bar, admin sidebar, superadmin sidebar — all three read this
+     one token). Near-black in dark, blue (#1c1e54) in light.
+     Tried carrying the light blue into dark so the bar stayed blue in both themes; it looked
+     wrong against the dark canvas and was reverted. The bar is meant to recede in dark mode. */
   --color-brand-dark: #090a0f;
 
   --color-ink: #f3f4f6;
@@ -128,9 +210,45 @@
   --color-muted-foreground: #9ca3af;
   --color-accent: #1a1d29;
   --color-accent-foreground: #f3f4f6;
+  /* Was missing, so `bg-destructive` stayed at the light ruby on dark surfaces. Tracks
+     --color-ruby's dark value. */
+  --color-destructive: #f43f5e;
+  --color-destructive-foreground: #ffffff;
   --color-border: #1e2230;
   --color-input: #2e344a;
   --color-ring: #818cf8;
+
+  /* ── Dashboard accents — dark ─────────────────────────────────────────────────
+   * 400-tier so they clear 4.5:1 on the #0f111a canvas. `-soft` is a 14% wash of the same
+   * hue rather than a 50-tier tint: a light tint here would punch a bright slab into a dark
+   * page (exactly the bug the raw #fff7ed literals still cause elsewhere).
+   */
+  --sec-orders: #fbbf24;         --sec-orders-soft: rgba(251, 191, 36, 0.14);
+  --sec-tables: #60a5fa;         --sec-tables-soft: rgba(96, 165, 250, 0.14);
+  --sec-walkins: #c084fc;        --sec-walkins-soft: rgba(192, 132, 252, 0.14);
+  --sec-rooms: #2dd4bf;          --sec-rooms-soft: rgba(45, 212, 191, 0.14);
+  --sec-sales: #4ade80;          --sec-sales-soft: rgba(74, 222, 128, 0.14);
+  --sec-credits: #818cf8;        --sec-credits-soft: rgba(129, 140, 248, 0.14);
+  --sec-menu: #34d399;           --sec-menu-soft: rgba(52, 211, 153, 0.14);
+  --sec-notifications: #f87171;  --sec-notifications-soft: rgba(248, 113, 113, 0.14);
+
+  --st-available: #4ade80;    --st-available-soft: rgba(74, 222, 128, 0.14);
+  --st-occupied: #60a5fa;     --st-occupied-soft: rgba(96, 165, 250, 0.14);
+  --st-cleaning: #fbbf24;     --st-cleaning-soft: rgba(251, 191, 36, 0.14);
+  --st-maintenance: #f87171;  --st-maintenance-soft: rgba(248, 113, 113, 0.14);
+
+  --cat-orange: #fb923c;  --cat-orange-soft: rgba(251, 146, 60, 0.14);
+  --cat-green: #4ade80;   --cat-green-soft: rgba(74, 222, 128, 0.14);
+  --cat-yellow: #facc15;  --cat-yellow-soft: rgba(250, 204, 21, 0.14);
+  --cat-blue: #60a5fa;    --cat-blue-soft: rgba(96, 165, 250, 0.14);
+  --cat-pink: #f472b6;    --cat-pink-soft: rgba(244, 114, 182, 0.14);
+  --cat-brown: #d6a06a;   --cat-brown-soft: rgba(214, 160, 106, 0.14);
+  --cat-purple: #c084fc;  --cat-purple-soft: rgba(192, 132, 252, 0.14);
+  --cat-cyan: #22d3ee;    --cat-cyan-soft: rgba(34, 211, 238, 0.14);
+  --cat-red: #f87171;     --cat-red-soft: rgba(248, 113, 113, 0.14);
+  --cat-teal: #2dd4bf;    --cat-teal-soft: rgba(45, 212, 191, 0.14);
+  --cat-indigo: #818cf8;  --cat-indigo-soft: rgba(129, 140, 248, 0.14);
+  --cat-lime: #a3e635;    --cat-lime-soft: rgba(163, 230, 53, 0.14);
 
   /* Semantic Dark Color Values */
   --color-success-val: #4ade80;

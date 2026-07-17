@@ -158,12 +158,12 @@ function PurchaseForm({
           ))}
         </select>
         {vendor && vendor.credit_balance > 0 && (
-          <p className="text-xs" style={{ color: "#9a3412" }}>
+          <p className="text-xs" style={{ color: "var(--color-warning)" }}>
             You already owe {vendor.name} {money2(vendor.credit_balance)}.
           </p>
         )}
         {vendors.length === 0 && (
-          <p className="text-xs" style={{ color: "#9a3412" }}>No active vendors — add one first.</p>
+          <p className="text-xs" style={{ color: "var(--color-warning)" }}>No active vendors — add one first.</p>
         )}
       </div>
 
@@ -326,8 +326,8 @@ function PurchaseForm({
       <div
         className="rounded-lg border px-4 py-3 flex flex-col gap-1.5"
         style={{
-          background: method === "credit" ? "#fff7ed" : "var(--color-canvas-soft)",
-          borderColor: method === "credit" ? "#f9731644" : "var(--color-hairline)",
+          background: method === "credit" ? "var(--color-warning-bg)" : "var(--color-canvas-soft)",
+          borderColor: method === "credit" ? "color-mix(in srgb, var(--color-warning) 27%, transparent)" : "var(--color-hairline)",
         }}
       >
         <div className="flex items-center justify-between text-sm">
@@ -340,9 +340,9 @@ function PurchaseForm({
               <span style={{ color: "var(--color-ink-mute)" }}>Paying now</span>
               <span className="tabular-nums" style={{ color: "var(--color-ink)" }}>− {money2(paidNowNum)}</span>
             </div>
-            <div className="flex items-center justify-between pt-1.5 border-t" style={{ borderColor: "#f9731633" }}>
+            <div className="flex items-center justify-between pt-1.5 border-t" style={{ borderColor: "color-mix(in srgb, var(--color-warning) 20%, transparent)" }}>
               <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>Goes on vendor credit</span>
-              <span className="text-lg font-medium tabular-nums" style={{ color: "#9a3412" }}>{money2(onCredit)}</span>
+              <span className="text-lg font-medium tabular-nums" style={{ color: "var(--color-warning)" }}>{money2(onCredit)}</span>
             </div>
           </>
         )}
@@ -357,7 +357,7 @@ function PurchaseForm({
       <Input name="notes" placeholder="Note (optional) — e.g. invoice #1234" autoComplete="off" />
 
       {state?.error && (
-        <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>
+        <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
           {state.error}
         </p>
       )}
@@ -388,7 +388,7 @@ function PurchaseDetailView({ purchaseId }: { purchaseId: string }) {
   }, [purchaseId]);
 
   if (error) {
-    return <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "#fff0f4" }}>{error}</p>;
+    return <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>{error}</p>;
   }
   if (!detail) {
     return (
@@ -457,7 +457,7 @@ function PurchaseDetailView({ purchaseId }: { purchaseId: string }) {
         {detail.credit_amount > 0 && (
           <div className="flex justify-between gap-3">
             <span>Added to vendor credit</span>
-            <span style={{ color: "#9a3412" }}>{money2(detail.credit_amount)}</span>
+            <span style={{ color: "var(--color-warning)" }}>{money2(detail.credit_amount)}</span>
           </div>
         )}
         <div className="flex justify-between gap-3">
@@ -683,7 +683,7 @@ export function PurchasesClient({
                     </td>
                     <td
                       className="px-4 py-3 text-right tabular-nums"
-                      style={{ color: p.credit_amount > 0 ? "#dc2626" : "var(--color-ink-mute)" }}
+                      style={{ color: p.credit_amount > 0 ? "var(--color-danger)" : "var(--color-ink-mute)" }}
                     >
                       {p.credit_amount > 0 ? money2(p.credit_amount) : "—"}
                     </td>
@@ -724,7 +724,7 @@ export function PurchasesClient({
                   </div>
                 </div>
                 {p.credit_amount > 0 && (
-                  <p className="text-xs mt-1.5" style={{ color: "#dc2626" }}>
+                  <p className="text-xs mt-1.5" style={{ color: "var(--color-danger)" }}>
                     {money2(p.credit_amount)} added to vendor credit
                   </p>
                 )}

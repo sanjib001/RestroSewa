@@ -84,6 +84,18 @@ export async function verifyCustomerPin(
   return { success, resolvedSessionId: success ? (fresh.id as string) : null };
 }
 
+// True while a table is still awaiting a wipe-down after the last party left. Not exported:
+// a "use server" module may only export async server actions, and this is an internal check.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function tableNeedsCleaning(service: any, tableId: string): Promise<boolean> {
+  const { data } = await service
+    .from("restaurant_tables")
+    .select("cleaning_since")
+    .eq("id", tableId)
+    .maybeSingle();
+  return !!data?.cleaning_since;
+}
+
 // Finds (or lazily creates) the active session a no-PIN ordering customer should
 // attach their order to. Only permitted for restaurants configured with
 // qr_mode = "ordering_no_pin" — this is the server-side guard that keeps PIN-mode
@@ -127,6 +139,13 @@ export async function ensureCustomerSession(
 
   const { data: existing } = await q.maybeSingle();
   if (existing) return { sessionId: existing.id as string };
+
+  // The table hasn't been cleaned since the last party left, so it isn't ready to seat
+  // anyone. The DB refuses the insert anyway (trg_refuse_session_on_dirty_table) — this
+  // turns it into something a guest can understand.
+  if (tableId && (await tableNeedsCleaning(service, tableId))) {
+    return { sessionId: null, error: "This table is being cleaned. Please ask a staff member." };
+  }
 
   // No active session yet — open one without a PIN.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -249,6 +268,9 @@ export async function requestTableActivation(
 
   // Reuse a still-pending session, else open a new one.
   let sessionId = open?.id as string | undefined;
+  if (!sessionId && tableId && (await tableNeedsCleaning(service, tableId))) {
+    return { status: "error", sessionId: null, error: "This table is being cleaned. Please ask a staff member." };
+  }
   if (!sessionId) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: created, error } = await (service as any)

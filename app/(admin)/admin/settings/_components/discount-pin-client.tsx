@@ -40,9 +40,9 @@ export function DiscountPinClient({ pinSet }: { pinSet: boolean }) {
       <div
         className="rounded-lg border px-4 py-2.5 mb-4 text-sm flex items-center gap-2"
         style={{
-          borderColor: pinSet ? "#1a7a4a44" : "var(--color-hairline)",
-          background: pinSet ? "#f0fdf4" : "var(--color-canvas-soft)",
-          color: pinSet ? "#1a7a4a" : "var(--color-ink-mute)",
+          borderColor: pinSet ? "color-mix(in srgb, var(--color-success) 27%, transparent)" : "var(--color-hairline)",
+          background: pinSet ? "var(--color-success-bg)" : "var(--color-canvas-soft)",
+          color: pinSet ? "var(--color-success)" : "var(--color-ink-mute)",
         }}
       >
         {pinSet ? <ShieldCheck size={15} /> : <ShieldOff size={15} />}
@@ -104,7 +104,7 @@ export function DiscountPinClient({ pinSet }: { pinSet: boolean }) {
         )}
 
         {saved && (
-          <span className="text-sm flex items-center gap-1.5" style={{ color: "#1a7a4a" }}>
+          <span className="text-sm flex items-center gap-1.5" style={{ color: "var(--color-success)" }}>
             <CheckCircle2 size={15} /> Saved
           </span>
         )}

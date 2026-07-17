@@ -88,6 +88,8 @@ function QrModal({
 
         <div
           className="p-3 rounded-xl"
+          // MUST stay white in both themes — a QR needs a light quiet zone to scan. Do NOT
+          // tokenise this to --color-canvas; a dark background makes the code unscannable.
           style={{ background: "#ffffff", border: "1px solid var(--color-hairline)" }}
         >
           <QRCodeCanvas
@@ -248,7 +250,7 @@ function TablePill({
         <button
           type="button"
           className="text-xs"
-          style={{ color: table.is_active ? "#1a7a4a" : "var(--color-ink-mute)" }}
+          style={{ color: table.is_active ? "var(--color-success)" : "var(--color-ink-mute)" }}
           onClick={() => startToggle(async () => { await toggleTableStatus(table.id, !table.is_active); })}
         >
           {table.is_active ? "●" : "○"}
@@ -555,7 +557,7 @@ export function TablesClient({
           <div>
             <p
               className="text-xs uppercase tracking-wide mb-1 font-medium"
-              style={{ color: "#b45309", letterSpacing: "0.06em" }}
+              style={{ color: "var(--color-warning)", letterSpacing: "0.06em" }}
             >
               Ungrouped — needs a group
             </p>

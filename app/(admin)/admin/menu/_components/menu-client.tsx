@@ -6,6 +6,7 @@ import {
   useTransition,
   useEffect,
   useCallback,
+  useMemo,
 } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -37,6 +38,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FoodMark } from "@/components/ui/food-mark";
 import { FOOD_TYPES, FOOD_TYPE_KEYS, type FoodType } from "@/lib/food-types";
+import { assignCategoryHues, styleOf, type CategoryHue } from "@/lib/category-colors";
 import {
   ChevronDown,
   ChevronRight,
@@ -91,9 +93,9 @@ function FoodTypePicker({
 }
 
 const STATUS_CONFIG = {
-  available: { color: "#1a7a4a", bg: "#f0fdf4", label: "Available" },
-  out_of_stock: { color: "#b45309", bg: "#fffbeb", label: "Out of Stock" },
-  hidden: { color: "#6b7280", bg: "#f9fafb", label: "Hidden" },
+  available: { color: "var(--color-success)", bg: "var(--color-success-bg)", label: "Available" },
+  out_of_stock: { color: "var(--color-warning)", bg: "var(--color-warning-bg)", label: "Out of Stock" },
+  hidden: { color: "#6b7280", bg: "var(--color-canvas-soft)", label: "Hidden" },
 } as const;
 
 const BADGE_OPTIONS = ["Featured", "Chef's Recommendation", "Best Seller", "New"] as const;
@@ -331,7 +333,7 @@ function VariantLine({
         type="button"
         className="text-xs px-2 py-0.5 rounded-full border shrink-0"
         style={variant.is_available
-          ? { color: "#1a7a4a", borderColor: "#1a7a4a44", background: "#f0fdf4" }
+          ? { color: "var(--color-success)", borderColor: "color-mix(in srgb, var(--color-success) 27%, transparent)", background: "var(--color-success-bg)" }
           : { color: "var(--color-ink-mute)", borderColor: "var(--color-hairline)", background: "transparent" }
         }
         onClick={() => startToggle(async () => {
@@ -820,7 +822,7 @@ function ItemEditPanel({
               <p className="text-xs" style={{ color: "var(--color-ruby)" }}>{updateState.error}</p>
             )}
             {updateSubmitted && !updatePending && updateState === null && (
-              <p className="text-xs" style={{ color: "#1a7a4a" }}>Saved</p>
+              <p className="text-xs" style={{ color: "var(--color-success)" }}>Saved</p>
             )}
           </div>
         )}
@@ -972,7 +974,7 @@ function ItemCard({ item }: { item: MenuItemRow }) {
         <p className="flex-1 text-sm truncate" style={{ color: "var(--color-ink)" }}>
           {item.name}
           {item.is_featured && (
-            <span className="ml-1.5 text-xs" style={{ color: "#b45309" }}>★</span>
+            <span className="ml-1.5 text-xs" style={{ color: "var(--color-warning)" }}>★</span>
           )}
           {item.has_variants && (
             <span className="ml-1.5 text-xs" style={{ color: "var(--color-ink-mute)" }}>+variants</span>
@@ -990,8 +992,8 @@ function ItemCard({ item }: { item: MenuItemRow }) {
           onClick={() => startToggle(async () => { await toggleItemAvailability(item.id, !isAvailable); })}
           className="text-xs px-2.5 py-1 rounded-full border font-medium shrink-0"
           style={isAvailable
-            ? { color: "#92400e", borderColor: "#f59e0b66", background: "#fffbeb" }
-            : { color: "#14532d", borderColor: "#22c55e66", background: "#f0fdf4" }
+            ? { color: "var(--color-warning)", borderColor: "color-mix(in srgb, var(--color-warning) 40%, transparent)", background: "var(--color-warning-bg)" }
+            : { color: "var(--color-success)", borderColor: "color-mix(in srgb, var(--color-success) 40%, transparent)", background: "var(--color-success-bg)" }
           }
         >
           {isAvailable ? "Mark out of stock" : "Mark available"}
@@ -1035,6 +1037,7 @@ function ItemCard({ item }: { item: MenuItemRow }) {
 
 function CategoryAccordion({
   category,
+  hue,
   items,
   restaurantId,
   workstations,
@@ -1042,6 +1045,8 @@ function CategoryAccordion({
   isLast = false,
 }: {
   category: CategoryRow;
+  /** Allocated across the whole list by the parent, so no two categories collide. */
+  hue: CategoryHue;
   items: MenuItemRow[];
   restaurantId: string;
   workstations: WorkstationRow[];
@@ -1067,11 +1072,25 @@ function CategoryAccordion({
   }, [editSubmitted, editPending, editState]);
 
   const catItems = items.filter((i) => i.category_id === category.id);
+  const cat = styleOf(hue);
 
   return (
     <div
-      className="rounded-xl border overflow-hidden"
-      style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+      className="rounded-xl border overflow-hidden transition-colors"
+      // Tapping a category makes it wear its own colour, exactly the way a dashboard section
+      // does: accent on the top (2px) and left (3px) edges, hairline elsewhere. At rest only
+      // the small bar in the header carries the hue, so a long list stays calm and the ONE
+      // category you opened is unmistakable.
+      style={{
+        background: "var(--color-canvas)",
+        borderColor: "var(--color-hairline)",
+        ...(open && {
+          borderTopColor: cat.color,
+          borderTopWidth: 2,
+          borderLeftColor: cat.color,
+          borderLeftWidth: 3,
+        }),
+      }}
     >
       {/* Header */}
       {editing ? (
@@ -1118,24 +1137,42 @@ function CategoryAccordion({
           )}
         </form>
       ) : (
-        <div className="flex items-center gap-3 px-4 py-3">
+        // Eight controls used to sit in one non-wrapping row (title, count, description, two
+        // reorder arrows, Active, edit, add, delete), which overflowed the moment the viewport
+        // got narrow. Now the row WRAPS: the title claims a full line of its own below `sm`
+        // (`basis-full`), and the actions fall onto a second line instead of being squeezed.
+        // The category's colour rides on the left edge as a bar + the title, so a category is
+        // identifiable before its name is read.
+        <div
+          className="flex items-center gap-x-3 gap-y-2 px-4 py-3 flex-wrap transition-colors"
+          // The open category's header takes its own soft tint — the same soft/colour pairing
+          // the section icon tiles and status pills use, so it flips in dark mode for free.
+          style={{ background: open ? cat.soft : undefined }}
+        >
+          <span
+            aria-hidden
+            className="w-1 self-stretch rounded-full shrink-0"
+            style={{ background: cat.color, minHeight: 20 }}
+          />
           <button
             type="button"
             onClick={() => setOpen(!open)}
-            className="flex items-center gap-2 flex-1 text-left"
+            className="flex items-center gap-2 min-w-0 basis-full sm:basis-auto sm:flex-1 text-left"
           >
             {open
-              ? <ChevronDown size={15} style={{ color: "var(--color-ink-mute)" }} />
-              : <ChevronRight size={15} style={{ color: "var(--color-ink-mute)" }} />
+              ? <ChevronDown size={15} className="shrink-0" style={{ color: "var(--color-ink-mute)" }} />
+              : <ChevronRight size={15} className="shrink-0" style={{ color: "var(--color-ink-mute)" }} />
             }
-            <span className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
+            <span className="text-base font-medium truncate" style={{ color: cat.color }}>
               {category.name}
             </span>
-            <span className="text-xs ml-1" style={{ color: "var(--color-ink-mute)" }}>
+            <span className="text-sm shrink-0" style={{ color: "var(--color-ink-mute)" }}>
               {catItems.length} items · {category.workstation_name ?? "—"}
             </span>
+            {/* The description is the first thing to go when space is tight — it's the least
+                actionable part of the row. */}
             {category.description && (
-              <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+              <span className="text-xs truncate hidden md:inline" style={{ color: "var(--color-ink-mute)" }}>
                 · {category.description}
               </span>
             )}
@@ -1143,7 +1180,7 @@ function CategoryAccordion({
 
           {/* Reorder. This order is what the CUSTOMER menu shows, so the arrows
               are the only way to arrange it — the list is no longer alphabetical. */}
-          <div className="flex items-center">
+          <div className="flex items-center ml-auto sm:ml-0">
             <button
               type="button"
               title="Move up"
@@ -1170,11 +1207,12 @@ function CategoryAccordion({
 
           <button
             type="button"
-            className="text-xs px-2 py-0.5 rounded-md border"
+            className="text-sm px-2 py-0.5 rounded-md border shrink-0"
+            // Was a hard-coded green / light-green slab that stayed light on a dark page.
             style={{
-              color: category.is_active ? "#1a7a4a" : "var(--color-ink-mute)",
-              borderColor: category.is_active ? "#1a7a4a44" : "var(--color-hairline)",
-              background: category.is_active ? "#f0fdf4" : "transparent",
+              color: category.is_active ? "var(--st-available)" : "var(--color-ink-mute)",
+              borderColor: category.is_active ? "var(--st-available)" : "var(--color-hairline)",
+              background: category.is_active ? "var(--st-available-soft)" : "transparent",
             }}
             onClick={() => startToggle(async () => { await toggleCategoryStatus(category.id, !category.is_active); })}
           >
@@ -1218,7 +1256,9 @@ function CategoryAccordion({
       {open && (
         <div
           className="px-4 pb-3 border-t"
-          style={{ borderColor: "var(--color-hairline)" }}
+          // The rule under the tinted header picks up the category's colour too, so the open
+          // panel reads as one block rather than a tinted strip with an unrelated list below it.
+          style={{ borderColor: cat.color }}
         >
           {catItems.length === 0 && !addingItem && (
             <p className="text-xs py-2" style={{ color: "var(--color-ink-mute)" }}>
@@ -1264,10 +1304,17 @@ export function MenuClient({
 }) {
   const [addingCategory, setAddingCategory] = useState(false);
 
+  // Allocated over the whole list at once — per-category hashing collided far too often to be
+  // useful (see assignCategoryHues). Memoised so it's stable across re-renders.
+  const hues = useMemo(() => assignCategoryHues(categories), [categories]);
+
   return (
-    <div className="flex flex-col gap-4 max-w-2xl">
+    // `max-w-2xl` capped this at 672px, so on a desktop the Menu section sat in the left half
+    // of its card while every other section (Tables, Rooms, Sales) filled the width. Full width
+    // now; the rows below manage their own layout at every size.
+    <div className="flex flex-col gap-4 w-full">
       <div className="flex items-center justify-between">
-        <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
+        <p className="text-base" style={{ color: "var(--color-ink-mute)" }}>
           {categories.length} categories · {items.length} items
         </p>
         {!addingCategory && (
@@ -1301,6 +1348,7 @@ export function MenuClient({
             <CategoryAccordion
               key={c.id}
               category={c}
+              hue={hues.get(c.id)!}
               items={items}
               restaurantId={restaurantId}
               workstations={workstations}

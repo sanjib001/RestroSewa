@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ListOrdered, ChevronDown } from "lucide-react";
+import { SECTION_ACCENT } from "@/lib/section-colors";
 import { OrdersQueue } from "../../queue/_components/orders-queue";
 import type { OrdersStats } from "../../queue/_components/orders-queue";
 import type { QueueOrder } from "@/app/actions/pos";
@@ -50,10 +51,23 @@ export function OrdersSection({
     ? `${stats.pending} pending · live`
     : "No active orders";
 
+  // Orders is a `bare` section, so it hand-rolls the chrome SectionCard gives the others —
+  // which means the amber identity has to be applied here too, or Orders would be the one
+  // section without a colour.
+  const accent = SECTION_ACCENT.orders;
+
   return (
     <div
       className="rounded-2xl border overflow-hidden"
-      style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+      // Mirrors SectionCard's top+left accent edges — see the note there.
+      style={{
+        background: "var(--color-canvas)",
+        borderColor: "var(--color-hairline)",
+        borderTopColor: accent.color,
+        borderTopWidth: 2,
+        borderLeftColor: accent.color,
+        borderLeftWidth: 3,
+      }}
     >
       <button
         type="button"
@@ -62,27 +76,32 @@ export function OrdersSection({
         className="w-full flex items-center gap-3 px-4 sm:px-5 py-3.5 text-left"
       >
         <span
-          className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-          style={{ background: "var(--color-canvas-soft)", color: "var(--color-primary)" }}
+          className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
+          style={{ background: accent.soft, color: accent.color }}
         >
-          <ListOrdered size={18} strokeWidth={1.6} />
+          <ListOrdered size={20} strokeWidth={1.9} />
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block text-base font-medium" style={{ color: "var(--color-ink)" }}>Orders</span>
-          <span className="block text-xs truncate" style={{ color: "var(--color-ink-mute)" }}>{subtitle}</span>
+          <span className="block text-lg font-medium" style={{ color: accent.color }}>Orders</span>
+          <span className="block text-sm truncate" style={{ color: "var(--color-ink-mute)" }}>{subtitle}</span>
         </span>
         {flash && (
           <span
+            // Green = "something new arrived and it's good news", not the section's amber —
+            // this badge is an event, not an identity. Constant green FILL so white text stays
+            // readable in dark (st-available flips to a light green white can't sit on).
             className="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-full animate-pulse"
-            style={{ background: "#1a7a4a", color: "#fff" }}
+            style={{ background: "var(--fill-green)", color: "#fff" }}
           >
             New order
           </span>
         )}
         {hasOrders && (
           <span
-            className={`shrink-0 min-w-[22px] h-[22px] px-1.5 rounded-full text-xs font-semibold flex items-center justify-center ${flash ? "animate-pulse" : ""}`}
-            style={{ background: "var(--color-primary)", color: "#fff" }}
+            // The section's own count badge. Uses the constant amber FILL (not accent.color):
+            // in dark the accent flips to a light amber that white text can't sit on.
+            className={`shrink-0 min-w-[24px] h-[24px] px-1.5 rounded-full text-sm font-semibold flex items-center justify-center ${flash ? "animate-pulse" : ""}`}
+            style={{ background: "var(--fill-amber)", color: "#fff" }}
           >
             {stats.total}
           </span>

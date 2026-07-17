@@ -9,9 +9,24 @@ import { Clock, User } from "lucide-react";
 // Orders now arrive by push. This is a safety net for a dropped SSE stream only.
 const FALLBACK_POLL_MS = 60_000;
 
-const STATUS_META: Record<QueueOrder["status"], { label: string; color: string; bg: string }> = {
-  pending: { label: "Pending", color: "#f97316", bg: "#fff7ed" },
-  served: { label: "Served", color: "var(--color-ink-mute)", bg: "var(--color-canvas-soft)" },
+// Tokens, not hex. These cards sit on the dashboard, which is dark when dark mode is on — the
+// old orange / cream / white literals painted a bright cream header band and a white status
+// pill onto a dark card the moment a pending order arrived (the "colour mix-max" bug). The
+// warning tokens flip with the theme; `border` uses color-mix so the subtle tinted edge (the
+// old alpha-suffixed border) also flips instead of concatenating alpha onto a var(), which isn't a colour.
+const STATUS_META: Record<QueueOrder["status"], { label: string; color: string; bg: string; border: string }> = {
+  pending: {
+    label: "Pending",
+    color: "var(--color-warning)",
+    bg: "var(--color-warning-bg)",
+    border: "color-mix(in srgb, var(--color-warning) 30%, transparent)",
+  },
+  served: {
+    label: "Served",
+    color: "var(--color-ink-mute)",
+    bg: "var(--color-canvas-soft)",
+    border: "var(--color-hairline)",
+  },
 };
 
 function timeSince(iso: string) {
@@ -72,6 +87,10 @@ function ItemRow({
           disabled={busy}
           onClick={() => onUpdate(item.id, next)}
           className="text-xs px-3 py-1.5 rounded-lg font-medium shrink-0 disabled:opacity-50"
+          // A SOLID green button with white text — stays a fixed mid-green in both themes on
+          // purpose. It must NOT use --color-success/--st-available: those flip to a light green
+          // in dark mode (tuned for text), and white text on light green is unreadable. A solid
+          // saturated fill reads fine on both a light and a dark card, so it's not the bug here.
           style={{ background: "#1a7a4a", color: "#fff" }}
         >
           Served
@@ -96,7 +115,7 @@ function OrderCard({
 }) {
   const meta = STATUS_META[order.status];
   return (
-    <div className="rounded-xl border overflow-hidden" style={{ background: "var(--color-canvas)", borderColor: meta.color + "44" }}>
+    <div className="rounded-xl border overflow-hidden" style={{ background: "var(--color-canvas)", borderColor: meta.border }}>
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: "var(--color-hairline)", background: meta.bg }}>
         <div className="flex-1 min-w-0">
@@ -110,7 +129,7 @@ function OrderCard({
             )}
           </p>
         </div>
-        <span className="text-xs px-2 py-0.5 rounded-full font-medium shrink-0" style={{ color: meta.color, background: "#fff", border: `1px solid ${meta.color}44` }}>
+        <span className="text-xs px-2 py-0.5 rounded-full font-medium shrink-0" style={{ color: meta.color, background: "var(--color-canvas)", border: `1px solid ${meta.border}` }}>
           {meta.label}
         </span>
       </div>
@@ -224,7 +243,7 @@ export function OrdersQueue({
     <div className="flex flex-col gap-6">
       {pendingOrders.length > 0 && (
         <section>
-          <p className="text-xs uppercase tracking-wide mb-2 font-medium" style={{ color: "#f97316", letterSpacing: "0.06em" }}>
+          <p className="text-xs uppercase tracking-wide mb-2 font-medium" style={{ color: "var(--color-warning)", letterSpacing: "0.06em" }}>
             Pending
           </p>
           <div className="flex flex-col gap-3">

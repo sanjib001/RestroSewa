@@ -20,6 +20,8 @@ export type ActionResult = { error: string } | null;
 //   check out / settle    close_bills     — like closing any other bill
 //   discount the folio    apply_discounts
 //   leave it on credit    process_payments + close_bills  (canManageCredits)
+//   mark it cleaned       view_rooms      — same as check-in: whoever can put a guest in
+//                                           the room is trusted to say it's been made up
 //
 // So a Receptionist is just a Cashier with view_rooms; no new permission had to
 // be granted to anyone, and none of the existing presets change meaning.
@@ -314,6 +316,8 @@ export async function checkInRoom(
       return { error: "This room still has an open session from before check-in existed. Settle that bill first." };
     }
     if (msg.includes("ROOM_UNAVAILABLE")) return { error: "This room is under maintenance." };
+    if (msg.includes("ROOM_NEEDS_CLEANING"))
+      return { error: "This room is still being cleaned. Mark it clean before checking a guest in." };
     if (msg.includes("GUEST_NAME_REQUIRED")) return { error: "Enter the guest's name." };
     if (msg.includes("ROOM_NOT_FOUND")) return { error: "That room no longer exists." };
     return { error: "Could not check the guest in. Please try again." };
@@ -321,6 +325,41 @@ export async function checkInRoom(
 
   revalidatePath("/employee/dashboard");
   redirect(`/employee/session/${data.session_id}`);
+}
+
+// A room parks in "cleaning" automatically at checkout (see check_out_room). This is the way
+// out: housekeeping taps once and it's sellable again.
+//
+// Same right as checking a guest IN (view_rooms + the room assignment filter) — whoever can
+// put a guest in the room is trusted to say it's been made up. Gating this behind
+// manage_rooms would leave the Waiter/Cashier presets unable to release a room, and rooms
+// would sit dirty waiting for a manager.
+export async function markRoomClean(roomId: string): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!canSeeRooms(ru)) return { error: "You don't have permission to manage rooms." };
+
+  const visibility = await buildVisibilityFilter(ru.restaurant_id, ru);
+  if (!visibility.seesAll && !visibility.canSeeRoom(roomId)) {
+    return { error: "That room isn't assigned to you." };
+  }
+
+  const service = createServiceClient();
+  // Only a room actually being cleaned is released. Scoping the UPDATE to status='cleaning'
+  // means this can never yank an OCCUPIED room out from under a guest, or quietly undo
+  // 'maintenance' — a stray tap does nothing rather than something wrong.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("rooms")
+    .update({ status: "available" })
+    .eq("id", roomId)
+    .eq("restaurant_id", ru.restaurant_id)
+    .eq("status", "cleaning");
+
+  if (error) return { error: "Could not mark the room clean. Please try again." };
+
+  // The UPDATE fires rs_ev_rooms, so reception's screen repaints without a refresh.
+  revalidatePath("/employee/dashboard");
+  return null;
 }
 
 // ─── The folio ───────────────────────────────────────────────────────────────

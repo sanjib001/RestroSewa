@@ -100,9 +100,11 @@ function StatTile({
       onClick={onClick}
       disabled={!clickable}
       className="rounded-xl border px-4 py-3 text-left transition-colors disabled:cursor-default"
+      // The selected period wears Sales' green. Constant green FILL (not the flipping accent):
+      // in dark the accent goes light-green and the white text on this tile can't sit on it.
       style={{
-        background: active ? "var(--color-primary)" : "var(--color-canvas)",
-        borderColor: active ? "var(--color-primary)" : "var(--color-hairline)",
+        background: active ? "var(--fill-green)" : "var(--color-canvas)",
+        borderColor: active ? "var(--fill-green)" : "var(--color-hairline)",
       }}
     >
       <p className="text-xs mb-1" style={{ color: active ? "rgba(255,255,255,0.75)" : "var(--color-ink-mute)" }}>
