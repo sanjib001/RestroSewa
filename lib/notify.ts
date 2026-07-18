@@ -278,6 +278,67 @@ export async function emitNewOrder(
 
   const byStation = await captureStations(service, orderId);
   await emitWorkstationOrderEvent(service, "new_order", ctx, byStation);
+
+  // …and the floor's copy: one plain alert to everyone who COVERS this table.
+  await emitGeneralNewOrder(service, ctx);
+}
+
+/**
+ * The front-of-house copy of a new order.
+ *
+ * One plain alert — "New order — Table A3 · 3 items" — to everyone who COVERS this table (waiter,
+ * cashier, manager), routed by PLACE, not station. The stations already got their item-specific
+ * alerts above; `canSeeNotification` deliberately excludes workstation staff, so the two audiences
+ * are DISJOINT and nobody is pinged twice.
+ *
+ * It names the WHOLE order as a count (front-of-house cares that an order landed, not which station
+ * makes what), and it fires even when no item has a station assigned — an unrouted menu item still
+ * needs a waiter to know it was ordered, and previously nobody was told.
+ */
+async function emitGeneralNewOrder(service: ServiceClient, ctx: OrderContext): Promise<void> {
+  const { data: created } = await service
+    .from("notifications")
+    .insert({
+      restaurant_id: ctx.restaurantId,
+      table_id: ctx.tableId,
+      room_id: ctx.roomId,
+      session_id: ctx.sessionId,
+      order_id: ctx.orderId,
+      type: "new_order",
+      status: "new",
+    })
+    .select("id")
+    .single();
+
+  if (!created) return;
+
+  const { data: items } = await service
+    .from("session_order_items")
+    .select("item_name, quantity, item_price")
+    .eq("order_id", ctx.orderId)
+    .is("cancelled_at", null);
+
+  const summary = ((items ?? []) as ItemRow[]).map((it) => ({
+    name: it.item_name,
+    quantity: it.quantity,
+    price: Number(it.item_price ?? 0),
+  }));
+
+  afterResponse(async () => {
+    await notifyStaff(ctx.restaurantId, {
+      id: created.id,
+      type: "new_order",
+      table_id: ctx.tableId,
+      room_id: ctx.roomId,
+      table_number: ctx.tableNumber,
+      room_number: ctx.roomNumber,
+      // No workstation_ids ⇒ routed by PLACE (recipientsFor → canSeeNotification, which excludes
+      // station staff). No workstation_name ⇒ the general payload, not the per-station one.
+      order_summary: summary,
+      order_total: summary.reduce((s, i) => s + i.price * i.quantity, 0),
+      category: "orders", // a front-of-house order alert, not a "station" one
+    });
+  });
 }
 
 /**

@@ -152,18 +152,39 @@ export function buildPushPayload(n: NotifiableRow): PushPayload | null {
     // still right for the panel. It is not right for push: a chef whose phone is in
     // their apron cannot see a queue on a screen they are not looking at.
     case "new_order": {
-      const station = n.workstation_name ?? "your station";
+      // `new_order` comes in TWO flavours, told apart by whether a station is named:
+      //
+      //   • STATION alert (workstation_name present) — goes to the chef / bartender and names
+      //     THEIR items ("New order · Kitchen — 3× Chicken Momo"), so they know what to make.
+      //   • GENERAL alert (no station) — goes to everyone who covers the table (waiter, cashier,
+      //     manager) and names the WHOLE order as a count ("New order — Table A3 · 3 items"),
+      //     because front-of-house cares that an order landed, not the station breakdown.
+      //
+      // The two audiences are disjoint (see lib/assignments canSeeNotification vs
+      // canSeeWorkstationEvent), so nobody receives both.
+      const items = n.order_summary ?? [];
+      if (n.workstation_name) {
+        return {
+          title: `New order · ${n.workstation_name}`,
+          body: `${place} — ${describeItems(items)}`,
+          url: FOCUS.orders,
+          // Tagged by ORDER, so a kitchen that gets three orders in a minute sees
+          // three alerts — unlike a service call, each one is a separate job.
+          tag: `order-${n.id}`,
+          notificationId: n.id,
+          // Deliberately NOT requireInteraction: an order is a job to work through the
+          // queue, not a decision to make from the lock screen. Making a chef dismiss
+          // every ticket by hand would be a tax, not a feature.
+          requireInteraction: false,
+        };
+      }
+      const count = items.reduce((s, i) => s + i.quantity, 0);
       return {
-        title: `New order · ${station}`,
-        body: `${place} — ${describeItems(n.order_summary ?? [])}`,
+        title: "New order",
+        body: `${place} · ${count} item${count === 1 ? "" : "s"}`,
         url: FOCUS.orders,
-        // Tagged by ORDER, so a kitchen that gets three orders in a minute sees
-        // three alerts — unlike a service call, each one is a separate job.
         tag: `order-${n.id}`,
         notificationId: n.id,
-        // Deliberately NOT requireInteraction: an order is a job to work through the
-        // queue, not a decision to make from the lock screen. Making a chef dismiss
-        // every ticket by hand would be a tax, not a feature.
         requireInteraction: false,
       };
     }
@@ -185,17 +206,14 @@ export function buildPushPayload(n: NotifiableRow): PushPayload | null {
     }
 
     case "payment_received":
-      return {
-        title: "Payment received",
-        body:
-          n.amount != null
-            ? `${place} — ${rupee(n.amount)} settled`
-            : `${place} — bill settled`,
-        url: FOCUS.sales,
-        tag: `paid-${n.id}`,
-        notificationId: n.id,
-        requireInteraction: false,
-      };
+      // Deliberately NO push (2026-07-18). This fired on bill close — "Table A1 — ₹500
+      // settled" — but the cashier who just closed the bill already knows, so it was pure
+      // close-time noise. Removed per the notifications spec: wake staff only for actionable
+      // events (table activation, bill request, waiter call, new order). The notification row is
+      // still written (it's excluded from the panel anyway) and every in-app sales/billing update
+      // keeps working — ONLY the phone/PWA push is suppressed, which is what returning null here
+      // does: this is the single gate that decides whether a type earns an interruption.
+      return null;
 
     default:
       // `order_ready` reaches here, and the room-service request types that nothing

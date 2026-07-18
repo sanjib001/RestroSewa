@@ -301,6 +301,12 @@ export async function notifyStaff(
     room_id: string | null;
     /** Workstation events (new_order, order_cancelled) route by station, not table. */
     workstation_ids?: string[];
+    /**
+     * Override the mute category. `categoryOf(type)` keys off the type alone, but a `new_order`
+     * comes in two flavours: the per-station one (category "station") and the general
+     * front-of-house one routed by place (category "orders"). This lets the caller say which.
+     */
+    category?: NotificationCategory;
   }
 ): Promise<void> {
   try {
@@ -326,7 +332,7 @@ export async function notifyStaff(
     // And this is the COURTESY gate: it decides who wants to know. It runs second and
     // can only ever remove people — un-muting a category must never buy someone an
     // alert the gate above refused them.
-    const userIds = await dropMuted(permitted, categoryOf(notif.type));
+    const userIds = await dropMuted(permitted, notif.category ?? categoryOf(notif.type));
     if (userIds.length === 0) return;
 
     const { sent, pruned } = await sendToUsers(userIds, payload);
