@@ -15,6 +15,12 @@ export type RestaurantUserContext = {
   role: string;
   display_name: string;
   permissions: string[];
+  /**
+   * The restaurant's business-day boundary — see `StaffRow.closingHour`.
+   * Server components read it from here to resolve dates before handing them to
+   * client components, which must never work the day out themselves.
+   */
+  closingHour: number;
 };
 
 export async function requireSuperAdmin() {

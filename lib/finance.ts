@@ -2,6 +2,8 @@
 // action file so the screen, the report and the CSV export all resolve a period
 // identically — the exported file can never disagree with what's on screen.
 
+import { businessPeriodBounds } from "@/lib/business-day";
+
 export type FinancePeriod =
   | "today"
   | "yesterday"
@@ -19,46 +21,24 @@ export const PERIOD_LABEL: Record<FinancePeriod, string> = {
   custom: "Custom Range",
 };
 
-const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 24 * 60 * 60 * 1000);
-
 /**
- * Resolve a period to [from, to) bounds in the server's local timezone — the
- * same basis Sales and Stock already use, so a finance day lines up with a
- * sales day.
+ * Resolve a period to [from, to) BUSINESS-day bounds.
  *
- * The upper bound is EXCLUSIVE. That is what makes the carry-forward exact: one
- * period's closing and the next period's opening are evaluated at the very same
- * instant, so they cannot disagree.
+ * The day maths itself lives in `lib/business-day.ts` — there used to be four
+ * separate copies of it in this codebase and they had already drifted apart
+ * (Sales measured "this week" as a rolling 168 hours while this file measured
+ * the last 7 days, so the two screens disagreed). One definition, one place.
+ *
+ * `hour` is the restaurant's business-day boundary, which every caller already
+ * holds as `ru.closingHour`.
  */
 export function periodBounds(
   period: FinancePeriod,
+  hour: number,
   from?: string | null,
   to?: string | null
 ): { from: Date; to: Date } {
-  const now = new Date();
-  const today = startOfDay(now);
-  const tomorrow = addDays(today, 1);
-
-  switch (period) {
-    case "today":
-      return { from: today, to: tomorrow };
-    case "yesterday":
-      return { from: addDays(today, -1), to: today };
-    // Week/month/year run up to the end of today, so today's trading is included.
-    case "week":
-      return { from: addDays(today, -6), to: tomorrow };
-    case "month":
-      return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: tomorrow };
-    case "year":
-      return { from: new Date(now.getFullYear(), 0, 1), to: tomorrow };
-    case "custom": {
-      const f = from ? startOfDay(new Date(`${from}T00:00:00`)) : today;
-      // `to` is a calendar day the user means to INCLUDE, so push to its end.
-      const t = to ? addDays(startOfDay(new Date(`${to}T00:00:00`)), 1) : tomorrow;
-      return { from: f, to: t > f ? t : addDays(f, 1) };
-    }
-  }
+  return businessPeriodBounds(period, hour, from, to);
 }
 
 /** Every figure on the Daily Finance Report. All derived — nothing is stored. */

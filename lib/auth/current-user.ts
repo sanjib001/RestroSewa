@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { normalizeClosingHour } from "@/lib/business-day";
 
 /**
  * Who is asking — resolved ONCE per request.
@@ -35,25 +36,48 @@ export type StaffRow = {
   role: string;
   display_name: string;
   permissions: string[];
+  /**
+   * The restaurant's business-day boundary (whole hours; 0 = midnight).
+   *
+   * It rides along on the staff row rather than being fetched where it's used:
+   * every server action already opens with `getRestaurantUser()`, so the hour
+   * arrives free inside a value the caller is holding anyway — no extra round
+   * trip, and it is structurally bound to the right tenant, so a report cannot
+   * accidentally be bucketed with another restaurant's boundary.
+   */
+  closingHour: number;
 };
 
 /** The caller's restaurant_users row, or null. Memoised per request. */
 export const getStaffRow = cache(async (authUserId: string): Promise<StaffRow | null> => {
   const service = createServiceClient();
+  // `restaurant_users` has exactly one FK to `restaurants`, so the embed is
+  // unambiguous and costs nothing beyond one more column on the same query.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (service as any)
     .from("restaurant_users")
-    .select("id, restaurant_id, role, display_name, permissions")
+    .select("id, restaurant_id, role, display_name, permissions, restaurants ( settings )")
     .eq("auth_user_id", authUserId)
     .eq("is_active", true)
     .is("deleted_at", null)
     .maybeSingle();
 
   if (!data) return null;
-  const row = data as StaffRow;
-  // A row predating the permissions migration can carry null.
-  if (!Array.isArray(row.permissions)) row.permissions = [];
-  return row;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const raw = data as any;
+  // PostgREST returns a to-one embed as an object, but tolerate an array so a
+  // relationship-shape change can't take down every authenticated request.
+  const rest = Array.isArray(raw.restaurants) ? raw.restaurants[0] : raw.restaurants;
+
+  return {
+    id: raw.id,
+    restaurant_id: raw.restaurant_id,
+    role: raw.role,
+    display_name: raw.display_name,
+    // A row predating the permissions migration can carry null.
+    permissions: Array.isArray(raw.permissions) ? raw.permissions : [],
+    closingHour: normalizeClosingHour(rest?.settings?.business_closing_hour),
+  };
 });
 
 /** The caller as staff, or null when not signed in / not staff. Memoised. */

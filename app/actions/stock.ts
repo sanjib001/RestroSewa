@@ -144,7 +144,7 @@ export async function getStock(params?: {
   if (!STOCK_ACCESS.canViewStock(ru)) return [];
 
   const service = createServiceClient();
-  const { from, to } = dayBounds(params?.day ?? null);
+  const { from, to } = dayBounds(params?.day ?? null, ru.closingHour);
 
   const [productsRes, reportRes, linksRes] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -6,6 +6,8 @@ export type RestaurantUserCtx = {
   restaurant_id: string;
   role: string;
   permissions: string[];
+  /** The restaurant's business-day boundary — see `StaffRow.closingHour`. */
+  closingHour: number;
 };
 
 /**

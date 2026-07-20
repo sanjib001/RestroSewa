@@ -10,6 +10,7 @@ import { buildVisibilityFilter, getAssignedWorkstationIds } from "@/lib/assignme
 import { computeCreditStats, settlementOf } from "@/lib/credits";
 import type { BillSettlement, CreditStats } from "@/lib/credits";
 import { resolveOrderItems } from "@/lib/order-items";
+import { businessDate, businessPeriodBounds, businessToday } from "@/lib/business-day";
 import {
   emitNewOrder,
   emitOrderCancelled,
@@ -1394,6 +1395,15 @@ export type SalesTxn = {
   online_amount: number;
   card_amount: number;
   created_at: string;
+  /**
+   * The BUSINESS day this bill belongs to (YYYY-MM-DD), resolved on the server.
+   *
+   * The list used to group by re-deriving the day from `created_at` in the
+   * browser, which meant the grouping could disagree with the totals in the same
+   * payload — on a device in another timezone, and every night once a business
+   * day can end after midnight. Now both come from one server computation.
+   */
+  business_date: string;
   table_number: string | null;
   room_number: string | null;
   session_type: string | null;
@@ -1433,42 +1443,33 @@ export type SalesReport = {
   /** Outstanding / collected / created, plus status counts. */
   credit: CreditStats;
   transactions: SalesTxn[];
+  /** Today's business date (YYYY-MM-DD) — what the list compares against to say "Today". */
+  businessToday: string;
+  /** Yesterday's, so the client needs no date arithmetic of its own at all. */
+  businessYesterday: string;
 };
 
-// Resolves a period (or custom range) to millisecond [from, to] bounds. The
-// today/week/month/year bounds match how the overview totals are computed so a
-// selected card's total always equals its period detail.
+/**
+ * Resolves a period (or custom range) to millisecond [from, to) bounds.
+ *
+ * Delegates to the app-wide business-day definition, which fixed three ways this
+ * used to disagree with the Finance report for the same restaurant on the same
+ * day:
+ *   - "This week" was a rolling 168 hours here and the last 7 days there.
+ *   - A custom `from`/`to` was parsed with `new Date("YYYY-MM-DD")`, i.e. as UTC,
+ *     so a range started 5h45m late in Nepal.
+ *   - The upper bound was `Infinity`; it is now the end of the current business
+ *     day, which matters once a day can end after midnight.
+ */
 function resolveSalesRange(
   period: SalesPeriod,
+  hour: number,
   from?: string | null,
   to?: string | null
 ): { fromMs: number; toMs: number } {
-  const now = new Date();
-  const nowMs = now.getTime();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-  const startOfYear = new Date(now.getFullYear(), 0, 1).getTime();
-  const weekAgo = nowMs - 7 * 24 * 60 * 60 * 1000;
-
-  switch (period) {
-    case "today":
-      return { fromMs: startOfToday, toMs: Infinity };
-    case "week":
-      return { fromMs: weekAgo, toMs: Infinity };
-    case "month":
-      return { fromMs: startOfMonth, toMs: Infinity };
-    case "year":
-      return { fromMs: startOfYear, toMs: Infinity };
-    case "custom": {
-      const f = from ? new Date(from).getTime() : -Infinity;
-      // `to` is a calendar day — include the whole day by pushing to its end.
-      const t = to ? new Date(to).getTime() + 24 * 60 * 60 * 1000 - 1 : Infinity;
-      return { fromMs: Number.isNaN(f) ? -Infinity : f, toMs: Number.isNaN(t) ? Infinity : t };
-    }
-    case "all":
-    default:
-      return { fromMs: -Infinity, toMs: Infinity };
-  }
+  if (period === "all") return { fromMs: -Infinity, toMs: Infinity };
+  const b = businessPeriodBounds(period, hour, from, to);
+  return { fromMs: b.from.getTime(), toMs: b.to.getTime() };
 }
 
 // Self-authing sales report. Derives the restaurant from the session (never
@@ -1503,6 +1504,11 @@ export async function getSalesReport(params?: {
       discountsTotal: 0,
       credit: emptyCredit,
       transactions: [],
+      businessToday: businessToday(ru.closingHour),
+      businessYesterday: businessDate(
+        new Date(businessPeriodBounds("yesterday", ru.closingHour).from),
+        ru.closingHour
+      ),
     };
   }
 
@@ -1550,13 +1556,16 @@ export async function getSalesReport(params?: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows = (paymentsRes.data ?? []) as any[];
 
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const weekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-  const startOfYear = new Date(now.getFullYear(), 0, 1).getTime();
+  // The overview cards come from the SAME resolver as the selected period, so a
+  // card's total always equals the detail you get by clicking it. They used to be
+  // re-derived inline here, which is exactly how "this week" drifted into meaning
+  // two different things on one screen.
+  const startOfToday = businessPeriodBounds("today", ru.closingHour).from.getTime();
+  const weekAgo = businessPeriodBounds("week", ru.closingHour).from.getTime();
+  const startOfMonth = businessPeriodBounds("month", ru.closingHour).from.getTime();
+  const startOfYear = businessPeriodBounds("year", ru.closingHour).from.getTime();
 
-  const { fromMs, toMs } = resolveSalesRange(period, params?.from, params?.to);
+  const { fromMs, toMs } = resolveSalesRange(period, ru.closingHour, params?.from, params?.to);
 
   const overview = { today: 0, week: 0, month: 0, year: 0, total: 0 };
   const breakdown = { cash: 0, online: 0, card: 0, credit: 0, other: 0 };
@@ -1580,7 +1589,10 @@ export async function getSalesReport(params?: {
     if (ts >= startOfYear) overview.year += value;
 
     // Selected-period aggregation.
-    if (ts >= fromMs && ts <= toMs) {
+    // `toMs` is EXCLUSIVE (it is the next business day's first instant), so a
+    // bill landing exactly on the boundary belongs to the next day only — `<=`
+    // would count it in both.
+    if (ts >= fromMs && ts < toMs) {
       const cash = Number(p.cash_amount ?? 0);
       const online = Number(p.online_amount ?? 0);
       const card = Number(p.card_amount ?? 0);
@@ -1635,6 +1647,7 @@ export async function getSalesReport(params?: {
       online_amount: online,
       card_amount: card,
       created_at: p.created_at,
+      business_date: businessDate(new Date(p.created_at), ru.closingHour),
       table_number: p.sessions?.restaurant_tables?.number ?? null,
       room_number: p.sessions?.rooms?.number ?? null,
       session_type: p.sessions?.type ?? null,
@@ -1670,6 +1683,11 @@ export async function getSalesReport(params?: {
       toMs
     ),
     transactions,
+    businessToday: businessToday(ru.closingHour),
+    businessYesterday: businessDate(
+      new Date(businessPeriodBounds("yesterday", ru.closingHour).from),
+      ru.closingHour
+    ),
   };
 }
 
@@ -1724,10 +1742,10 @@ export async function exportSalesCsv(params?: {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows = (data ?? []) as any[];
-  const { fromMs, toMs } = resolveSalesRange(period, params?.from, params?.to);
+  const { fromMs, toMs } = resolveSalesRange(period, ru.closingHour, params?.from, params?.to);
   const inRange = rows.filter((p) => {
     const ts = new Date(p.created_at).getTime();
-    return ts >= fromMs && ts <= toMs;
+    return ts >= fromMs && ts < toMs; // upper bound exclusive — see getSalesReport
   });
 
   // Resolve cashier (created_by) → display name in one lookup.

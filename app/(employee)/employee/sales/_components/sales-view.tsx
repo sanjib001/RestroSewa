@@ -52,25 +52,31 @@ const PERIOD_LABEL: Record<SalesPeriod, string> = {
 };
 
 // ── Date-bucketing for the transaction list (Today / Yesterday / Month Year) ──
-function startOfDay(d: Date) {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+//
+// Every date here arrives already decided by the SERVER: each row carries its
+// own `business_date`, and the report says which business date is "today". This
+// component does no day arithmetic, deliberately — it used to call `new Date()`
+// and re-derive the day from the browser's clock, so the grouping could disagree
+// with the totals sitting right above it (a device in another timezone, or any
+// restaurant whose business day ends after midnight).
+function bucketLabel(t: SalesTxn, today: string, yesterday: string): string {
+  if (t.business_date === today) return "Today";
+  if (t.business_date === yesterday) return "Yesterday";
+  // Older than that, group by month — parsed as a LOCAL date, since
+  // `new Date("YYYY-MM-DD")` would be read as UTC and could name the wrong month.
+  const [y, m, d] = t.business_date.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
 }
 
-function bucketLabel(iso: string): string {
-  const d = new Date(iso);
-  const today = startOfDay(new Date());
-  const day = startOfDay(d);
-  const oneDay = 24 * 60 * 60 * 1000;
-  if (day === today) return "Today";
-  if (day === today - oneDay) return "Yesterday";
-  return d.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
-}
-
-function groupByDate(txns: SalesTxn[]): { label: string; items: SalesTxn[] }[] {
+function groupByDate(
+  txns: SalesTxn[],
+  today: string,
+  yesterday: string
+): { label: string; items: SalesTxn[] }[] {
   const groups: { label: string; items: SalesTxn[] }[] = [];
   const index = new Map<string, { label: string; items: SalesTxn[] }>();
   for (const t of txns) {
-    const label = bucketLabel(t.created_at);
+    const label = bucketLabel(t, today, yesterday);
     let g = index.get(label);
     if (!g) {
       g = { label, items: [] };
@@ -255,7 +261,10 @@ export function SalesView({ initial, embedded = false }: { initial: SalesReport;
   );
   useRealtime(["billing", "credits"], resync);
 
-  const groups = useMemo(() => groupByDate(report.transactions), [report.transactions]);
+  const groups = useMemo(
+    () => groupByDate(report.transactions, report.businessToday, report.businessYesterday),
+    [report.transactions, report.businessToday, report.businessYesterday]
+  );
 
   // A report cached by the client router from before credits existed has no
   // `credit` field, so don't assume it's there — an undefined read would take the

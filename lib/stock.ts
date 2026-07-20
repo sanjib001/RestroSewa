@@ -2,6 +2,8 @@
 // action files so the screens and the actions agree on what "today" means and on
 // when a product counts as low or out — the two can never drift apart.
 
+import { businessDayBounds, businessToday } from "@/lib/business-day";
+
 export type StockStatus = "ok" | "low" | "out";
 
 export const STOCK_STATUS_LABEL: Record<StockStatus, string> = {
@@ -28,26 +30,21 @@ export function stockStatus(closing: number, threshold: number): StockStatus {
 }
 
 /**
- * Midnight-to-midnight bounds for a calendar day (YYYY-MM-DD), in the server's
- * local timezone — the same basis the Sales screen already uses, so a stock day
- * and a sales day always line up.
+ * Bounds for one BUSINESS day (YYYY-MM-DD) — see `lib/business-day.ts`, which
+ * holds the single definition the whole app shares, so a stock day and a sales
+ * day always line up.
  *
  * The upper bound is exclusive, which is what makes the rollover exact: a day's
  * closing balance and the next day's opening balance are evaluated at the very
  * same instant, so they cannot disagree.
  */
-export function dayBounds(day?: string | null): { from: Date; to: Date } {
-  const base = day ? new Date(`${day}T00:00:00`) : new Date();
-  const from = new Date(base.getFullYear(), base.getMonth(), base.getDate());
-  const to = new Date(from.getTime() + 24 * 60 * 60 * 1000);
-  return { from, to };
+export function dayBounds(day: string | null | undefined, hour: number): { from: Date; to: Date } {
+  return businessDayBounds(day, hour);
 }
 
-/** Today as YYYY-MM-DD in local time (not UTC — `toISOString` would shift the day). */
-export function todayISO(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+/** The business day we're currently inside, as YYYY-MM-DD (local, never UTC). */
+export function todayISO(hour: number): string {
+  return businessToday(hour);
 }
 
 /** Trims trailing zeros so 2.500 shows as 2.5 and 3.000 as 3. */

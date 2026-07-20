@@ -8,6 +8,7 @@ import {
   getStockSummary,
 } from "@/app/actions/stock";
 import { StockClient } from "./_components/stock-client";
+import { businessToday } from "@/lib/business-day";
 
 // Stock & Finance → Stock. Viewing needs `view_stock` or `manage_stock`; adding
 // products, deducting stock and editing menu links need `manage_stock`. Every
@@ -34,6 +35,11 @@ export default async function StockPage() {
       initialSummary={summary}
       products={products}
       targets={targets}
+      // Computed on the SERVER: the day picker used to read the browser's clock,
+      // which disagrees with the reports whenever the device is in another
+      // timezone — and would disagree every night once a business day can end
+      // after midnight.
+      today={businessToday(restaurantUser.closingHour)}
       canManage={STOCK_ACCESS.canManageStock(restaurantUser)}
     />
   );

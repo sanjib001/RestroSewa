@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { NAV_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { computeCreditStats } from "@/lib/credits";
+import { businessPeriodBounds } from "@/lib/business-day";
 import type { CreditStats, CreditStatus } from "@/lib/credits";
 
 export type ActionResult = { error: string } | null;
@@ -222,8 +223,9 @@ export async function getCreditSummary(): Promise<CreditStats> {
       .eq("restaurant_id", ru.restaurant_id),
   ]);
 
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  // "Today" here means the current BUSINESS day, so credit taken at 1am on a
+  // 3am-closing restaurant counts against the night it was actually taken.
+  const startOfToday = businessPeriodBounds("today", ru.closingHour).from.getTime();
 
   return computeCreditStats(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

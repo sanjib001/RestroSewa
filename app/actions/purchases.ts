@@ -154,7 +154,7 @@ export async function getPurchaseSummary(day?: string | null): Promise<PurchaseS
   if (!STOCK_ACCESS.canViewStock(ru)) return empty;
 
   const service = createServiceClient();
-  const { from, to } = dayBounds(day ?? null);
+  const { from, to } = dayBounds(day ?? null, ru.closingHour);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (service as any)

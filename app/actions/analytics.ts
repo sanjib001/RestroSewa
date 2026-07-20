@@ -90,7 +90,7 @@ export async function getDashboardAnalytics(): Promise<DashboardAnalytics> {
   }
 
   const service = createServiceClient();
-  const { from, to } = periodBounds("today");
+  const { from, to } = periodBounds("today", ru.closingHour);
 
   const [statsRes, purchasesRes, salesRes] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

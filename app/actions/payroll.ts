@@ -349,14 +349,28 @@ export async function getPayrollSummary(params?: {
   const ru = await getRestaurantUser();
   if (!STOCK_ACCESS.canViewFinance(ru)) return EMPTY_PAYROLL_SUMMARY;
 
-  const { from, to } = periodBounds(params?.period ?? "today", params?.from, params?.to);
+  const { from, to } = periodBounds(
+    params?.period ?? "today",
+    ru.closingHour,
+    params?.from,
+    params?.to
+  );
 
   const service = createServiceClient();
+  // "Today" and "this month" are passed IN rather than derived in SQL: the
+  // database would compute them with `now()` in its own timezone (UTC), which
+  // disagreed with every other figure in the same row, and it has no way to know
+  // the restaurant's closing hour.
+  const today = periodBounds("today", ru.closingHour);
+  const month = periodBounds("month", ru.closingHour);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (service as any).rpc("payroll_summary", {
     p_restaurant_id: ru.restaurant_id,
     p_from: from.toISOString(),
     p_to: to.toISOString(),
+    p_today_from: today.from.toISOString(),
+    p_month_from: month.from.toISOString(),
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

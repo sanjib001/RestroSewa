@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 import { requireRestaurantAdmin } from "@/lib/auth/guards";
 import { normalizeBillLabel, type BillNumberLabel } from "@/lib/billing/bill-number";
+import { normalizeClosingHour } from "@/lib/business-day";
 import { defaultTicketCode, ticketCodeOf } from "@/lib/workstations/ticket-code";
 
 export type ActionResult = { error: string } | { ok: true } | null;
@@ -20,6 +21,11 @@ export type BillingSettings = {
   /** Whether a discount PIN is configured — i.e. whether discounts are possible at all.
    *  Only ever a boolean: the PIN itself never leaves the DB (see set_discount_pin). */
   discountPinSet: boolean;
+};
+
+export type BusinessDaySettings = {
+  /** The hour a business day rolls over, 0–23. 0 = midnight (the default). */
+  closingHour: number;
 };
 
 // Reads the restaurant's billing settings for the admin form. Admin-only; the page
@@ -139,6 +145,72 @@ export async function updateBillingSettings(
   // The floor reads these when printing, so refresh the surfaces that render a bill.
   revalidatePath("/admin/settings");
   revalidatePath("/employee/sales");
+  return { ok: true };
+}
+
+// ─── Business day ─────────────────────────────────────────────────────────────
+// Restaurants that trade past midnight count those sales as the previous night's
+// takings. This is the hour at which the books roll over.
+
+export async function getBusinessDaySettings(): Promise<BusinessDaySettings> {
+  const { restaurantUser } = await requireRestaurantAdmin();
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("restaurants")
+    .select("settings")
+    .eq("id", restaurantUser.restaurant_id)
+    .maybeSingle();
+
+  return { closingHour: normalizeClosingHour(data?.settings?.business_closing_hour) };
+}
+
+export async function updateBusinessDaySettings(
+  _prev: ActionResult,
+  formData: FormData
+): Promise<ActionResult> {
+  const { restaurantUser } = await requireRestaurantAdmin();
+  const service = createServiceClient();
+
+  const raw = ((formData.get("closing_hour") as string) || "").trim();
+  const hour = Number(raw);
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+    return { error: "Choose a valid closing time." };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: rest } = await (service as any)
+    .from("restaurants")
+    .select("settings")
+    .eq("id", restaurantUser.restaurant_id)
+    .maybeSingle();
+
+  const settings = { ...(rest?.settings ?? {}), business_closing_hour: hour };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("restaurants")
+    .update({ settings })
+    .eq("id", restaurantUser.restaurant_id);
+
+  if (error) return { error: error.message };
+
+  // This re-buckets every date-based figure in the app, so every reporting
+  // surface must be refreshed — a cached page would keep showing totals computed
+  // against the OLD boundary and quietly disagree with the rest of the system.
+  for (const p of [
+    "/admin/settings",
+    "/admin/dashboard",
+    "/admin/finance",
+    "/admin/stock",
+    "/admin/purchases",
+    "/admin/staff",
+    "/employee/sales",
+    "/employee/credits",
+    "/employee/dashboard",
+  ]) {
+    revalidatePath(p);
+  }
   return { ok: true };
 }
 

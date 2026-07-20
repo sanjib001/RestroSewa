@@ -41,7 +41,6 @@ import {
   STOCK_REASONS,
   STOCK_STATUS_COLOR,
   STOCK_STATUS_LABEL,
-  todayISO,
 } from "@/lib/stock";
 import type { StockMovement } from "@/lib/stock";
 import { useRealtime } from "@/lib/realtime/use-realtime";
@@ -951,19 +950,22 @@ export function StockClient({
   initialSummary,
   products,
   targets,
+  today,
   canManage,
 }: {
   initialStock: StockRow[];
   initialSummary: StockSummary;
   products: ProductOption[];
   targets: LinkTarget[];
+  /** Today's BUSINESS date (YYYY-MM-DD), resolved on the server — never `new Date()` here. */
+  today: string;
   canManage: boolean;
 }) {
   const [rows, setRows] = useState(initialStock);
   const [summary, setSummary] = useState(initialSummary);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<StockFilter>("all");
-  const [day, setDay] = useState(todayISO());
+  const [day, setDay] = useState(today);
   const [page, setPage] = useState(1);
   const [loading, startTransition] = useTransition();
 
@@ -1018,7 +1020,7 @@ export function StockClient({
     [rows, safePage]
   );
 
-  const isToday = day === todayISO();
+  const isToday = day === today;
 
   return (
     <div className="p-4 sm:p-6 max-w-6xl mx-auto">
@@ -1088,8 +1090,8 @@ export function StockClient({
         <input
           type="date"
           value={day}
-          max={todayISO()}
-          onChange={(e) => setDay(e.target.value || todayISO())}
+          max={today}
+          onChange={(e) => setDay(e.target.value || today)}
           className="text-sm rounded-lg border px-3 py-2"
           style={{
             background: isToday ? "var(--color-canvas)" : "var(--color-canvas-soft)",
