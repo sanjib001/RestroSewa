@@ -23,8 +23,15 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# local env files
-.env*.local
+# env files — ALL of them.
+# The Next.js default is only `.env*.local`, which does NOT cover `.env.production`
+# / `.env.development`. Those hold the service-role key, the database password and
+# the VAPID private key: a service-role key bypasses RLS entirely, so committing
+# one hands over every restaurant's data. Ignore the lot and allow an example file
+# back in explicitly.
+.env
+.env.*
+!.env.example
 
 # vercel
 .vercel
