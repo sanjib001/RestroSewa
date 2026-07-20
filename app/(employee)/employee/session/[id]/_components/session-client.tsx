@@ -21,7 +21,9 @@ import type { RestaurantInfo, PrintStation } from "./print-tickets";
 
 
 type PaymentMethod = "cash" | "online" | "card" | "mixed" | "credit";
-type DownTender = "cash" | "online" | "card";
+// A credit down payment can itself be split — a customer often hands over some
+// cash AND pays some online before the rest goes on their account.
+type DownTender = "cash" | "online" | "card" | "mixed";
 
 const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "cash",   label: "Cash"   },
@@ -35,6 +37,7 @@ const DOWN_TENDERS: { value: DownTender; label: string }[] = [
   { value: "cash",   label: "Cash"   },
   { value: "online", label: "Online" },
   { value: "card",   label: "Card"   },
+  { value: "mixed",  label: "Cash + Online" },
 ];
 
 function PaymentForm({
@@ -71,6 +74,9 @@ function PaymentForm({
   const [custPhone, setCustPhone]     = useState("");
   const [paidNow, setPaidNow]         = useState("");
   const [downTender, setDownTender]   = useState<DownTender>("cash");
+  // The cash/online halves when the down payment is itself split.
+  const [downCash, setDownCash]       = useState("");
+  const [downOnline, setDownOnline]   = useState("");
   const [creditNotes, setCreditNotes] = useState("");
 
   // Debounced lookup of existing accounts. This is what stops a returning
@@ -145,9 +151,15 @@ function PaymentForm({
   const paidNowNum   = parseFloat(paidNow) || 0;
   const creditAmount = Math.max(0, payable - paidNowNum);
   const paidNowValid = paidNowNum >= 0 && paidNowNum < payable;
+  // A split down payment: its two halves must add up to what's being paid now.
+  const downSplit = (parseFloat(downCash) || 0) + (parseFloat(downOnline) || 0);
+  const downSplitValid =
+    downTender !== "mixed" ||
+    paidNowNum === 0 ||
+    (downCash !== "" && downOnline !== "" && Math.abs(downSplit - paidNowNum) < 0.01);
   // Either an existing account is selected, or a new one is being named.
   const customerChosen = !!picked || (creatingNew && custName.trim().length > 0);
-  const creditValid = method !== "credit" || (customerChosen && paidNowValid);
+  const creditValid = method !== "credit" || (customerChosen && paidNowValid && downSplitValid);
 
   const canSubmit =
     !pending &&
@@ -159,10 +171,20 @@ function PaymentForm({
   const errorMsg = state?.error;
 
   // What the server records as tendered. On a credit bill this is the down
-  // payment only — the rest is the credit.
+  // payment only — the rest is the credit. A mixed down payment splits `paidNow`
+  // across cash and online; the DB already stores these as separate columns, so
+  // finance buckets each half correctly.
   const tender = {
-    cash:   method === "cash"  ? payable : method === "credit" && downTender === "cash"   ? paidNowNum : 0,
-    online: method === "online" ? payable : method === "credit" && downTender === "online" ? paidNowNum : 0,
+    cash:
+      method === "cash" ? payable
+      : method === "credit" && downTender === "cash"  ? paidNowNum
+      : method === "credit" && downTender === "mixed" ? (parseFloat(downCash) || 0)
+      : 0,
+    online:
+      method === "online" ? payable
+      : method === "credit" && downTender === "online" ? paidNowNum
+      : method === "credit" && downTender === "mixed"  ? (parseFloat(downOnline) || 0)
+      : 0,
     card:   method === "card"  ? payable : method === "credit" && downTender === "card"   ? paidNowNum : 0,
   };
 
@@ -593,14 +615,14 @@ function PaymentForm({
               <p className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
                 Paid by
               </p>
-              <div className="grid grid-cols-3 gap-1">
+              <div className="grid grid-cols-2 gap-1">
                 {DOWN_TENDERS.map((t) => {
                   const active = downTender === t.value;
                   return (
                     <button
                       key={t.value}
                       type="button"
-                      onClick={() => setDownTender(t.value)}
+                      onClick={() => { setDownTender(t.value); setDownCash(""); setDownOnline(""); }}
                       className="py-1.5 rounded-lg border text-sm transition-colors"
                       style={{
                         borderColor: active ? "var(--color-primary)" : "var(--color-hairline-input)",
@@ -613,6 +635,48 @@ function PaymentForm({
                   );
                 })}
               </div>
+
+              {/* Split the "paying now" amount across cash and online. Typing one
+                  fills the other, so the two always add up to what's being paid. */}
+              {downTender === "mixed" && (
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  {(["cash", "online"] as const).map((side) => {
+                    const val = side === "cash" ? downCash : downOnline;
+                    const setThis = side === "cash" ? setDownCash : setDownOnline;
+                    const setOther = side === "cash" ? setDownOnline : setDownCash;
+                    return (
+                      <div key={side} className="flex flex-col gap-1">
+                        <label className="text-[11px] uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
+                          {side === "cash" ? "Cash (₹)" : "Online (₹)"}
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm pointer-events-none" style={{ color: "var(--color-ink-mute)" }}>₹</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            max={paidNowNum}
+                            step="0.01"
+                            placeholder="0.00"
+                            value={val}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setThis(v);
+                              const n = parseFloat(v);
+                              setOther(v === "" || isNaN(n) ? "" : String(Math.round((paidNowNum - n) * 100) / 100 || 0));
+                            }}
+                            className="pl-6"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {!downSplitValid && (
+                    <p className="col-span-2 text-xs" style={{ color: "var(--color-ruby)" }}>
+                      Cash and online together must equal ₹{paidNowNum.toFixed(2)}.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
