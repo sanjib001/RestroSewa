@@ -564,6 +564,50 @@ export async function updateWalkInCustomer(
   return null;
 }
 
+// Optional customer name on a TABLE bill — reuses the same `sessions.customer_name`
+// column the walk-in flow already writes (added generic, not walk-in-scoped, by the
+// walk-in migration). Kept as its own action rather than widening
+// `updateWalkInCustomer`: that one is gated on `manage_walkins` and refuses anything
+// but a walk-in on purpose, and a table customer name is a normal order/billing
+// action, not a walk-in-desk one. Deliberately name-only — no phone/address — to
+// match the brief and keep the table screen uncluttered; nothing stops a later
+// widening if that's ever asked for.
+export async function updateTableCustomerName(
+  _prev: ActionResult,
+  formData: FormData
+): Promise<ActionResult> {
+  const ru = await getRestaurantUser();
+  if (!hasPermission(ru, PERMISSIONS.CREATE_ORDERS)) {
+    return { error: "You don't have permission to edit this order." };
+  }
+  const service = createServiceClient();
+
+  const sessionId = (formData.get("session_id") as string) || "";
+  const name = ((formData.get("customer_name") as string) || "").trim() || null;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: sess } = await (service as any)
+    .from("sessions")
+    .select("id, restaurant_id, type, status")
+    .eq("id", sessionId)
+    .maybeSingle();
+  if (!sess || sess.restaurant_id !== ru.restaurant_id || sess.type !== "table")
+    return { error: "Table session not found." };
+  // Editable only up to the point of payment, same rule as the walk-in panel —
+  // a settled bill's printed/emailed record must not keep changing under it.
+  if (sess.status !== "active") return { error: "This bill is already closed." };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("sessions")
+    .update({ customer_name: name })
+    .eq("id", sessionId);
+
+  if (error) return { error: error.message };
+  revalidatePath(`/employee/session/${sessionId}`);
+  return null;
+}
+
 // Walk-in write guard. A walk-in session is only mutable by staff with manage_walkins —
 // even if they hold the dine-in order/billing permission the action already checked. So a
 // staffer with `view_walkins` (read-only) plus, say, `create_orders` for tables cannot add
@@ -2137,7 +2181,7 @@ export async function getSalesReport(params?: {
       // table_id / room_id (+ room_stays.room_id for a room folio) come along so the
       // report can be scoped to the viewer's assigned tables/rooms — see the filter below.
       .select(
-        "id, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, sessions ( type, table_id, room_id, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), room_stays ( room_id ), credits ( id, credit_number, customer_name, down_payment )"
+        "id, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, sessions ( type, table_id, room_id, customer_name, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), room_stays ( room_id ), credits ( id, credit_number, customer_name, down_payment )"
       )
       .eq("restaurant_id", ru.restaurant_id)
       .order("created_at", { ascending: false }),
@@ -2286,8 +2330,13 @@ export async function getSalesReport(params?: {
       room_number: p.sessions?.rooms?.number ?? null,
       session_type: p.sessions?.type ?? null,
       // The credit record names the customer who owes; fall back to any legacy
-      // customer attached to the session.
-      customer_name: credit?.customer_name ?? p.sessions?.credit_customers?.name ?? null,
+      // customer attached to the session, then to a table bill's own optional
+      // customer name (never a walk-in's — that name has its own display slot
+      // and was never part of this field's meaning).
+      customer_name:
+        credit?.customer_name ??
+        p.sessions?.credit_customers?.name ??
+        (p.sessions?.type === "table" ? p.sessions?.customer_name ?? null : null),
       settlement,
       credit_id: credit?.id ?? null,
       credit_number: credit?.credit_number ?? null,
@@ -2370,7 +2419,7 @@ export async function exportSalesCsv(params?: {
     (service as any)
       .from("payments")
       .select(
-        "id, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, created_by, sessions ( type, table_id, room_id, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), room_stays ( room_id ), credits ( credit_number, customer_name )"
+        "id, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, created_by, sessions ( type, table_id, room_id, customer_name, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), room_stays ( room_id ), credits ( credit_number, customer_name )"
       )
       .eq("restaurant_id", ru.restaurant_id)
       .order("created_at", { ascending: false }),
@@ -2460,7 +2509,10 @@ export async function exportSalesCsv(params?: {
     const tendered = settlement === "paid" ? value : cash + online + card;
     const onCredit = Math.max(0, value - tendered);
 
-    const customer = credit?.customer_name ?? p.sessions?.credit_customers?.name ?? "";
+    const customer =
+      credit?.customer_name ??
+      p.sessions?.credit_customers?.name ??
+      (p.sessions?.type === "table" ? p.sessions?.customer_name ?? "" : "");
     const method = SALES_METHOD_LABEL[p.payment_method] ?? p.payment_method ?? "";
     const cashier = cashierNames.get(p.created_by) ?? "";
 
