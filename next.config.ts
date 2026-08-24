@@ -47,20 +47,16 @@ const supabaseImageHost = (() => {
 const nextConfig: NextConfig = {
   skipProxyUrlNormalize: true,
 
-  images: {
-    remotePatterns: supabaseImageHost
-      ? [{ ...supabaseImageHost, pathname: "/storage/v1/object/public/**" }]
-      : [],
-  },
-
-  // `pg` powers the real-time LISTEN connection (lib/realtime/bus.ts). It does
-  // dynamic requires (pg-native, TLS shims) that break when bundled, so it must
-  // be loaded from node_modules at runtime rather than compiled into the server
-  // bundle. Without this the listener silently fails to connect and every
-  // dashboard quietly falls back to the slow poll.
-  serverExternalPackages: ["pg"],
-
   experimental: {
+    serverActions: {
+      // Next's own default (1MB) is stricter than this app's advertised/enforced
+      // logo limit (branding.ts MAX_BYTES = 2MB) and is checked BEFORE the action
+      // runs — so a 1-2MB photo (most real phone camera JPGs) never even reaches
+      // the action's own friendly "over 2MB" message; Next rejects it outright
+      // with a 413. 3mb leaves headroom for multipart boundary/field overhead on
+      // top of the 2MB the app itself allows.
+      bodySizeLimit: "3mb",
+    },
     // Both are BARREL packages: `radix-ui` is an umbrella that re-exports every
     // primitive it has, and lucide-react re-exports well over a thousand icons. An
     // `import { Slot } from "radix-ui"` or `import { Bell } from "lucide-react"` is
@@ -73,6 +69,19 @@ const nextConfig: NextConfig = {
     // app AND the one thing a guest downloads over restaurant wifi on their own phone.
     optimizePackageImports: ["lucide-react", "radix-ui"],
   },
+
+  images: {
+    remotePatterns: supabaseImageHost
+      ? [{ ...supabaseImageHost, pathname: "/storage/v1/object/public/**" }]
+      : [],
+  },
+
+  // `pg` powers the real-time LISTEN connection (lib/realtime/bus.ts). It does
+  // dynamic requires (pg-native, TLS shims) that break when bundled, so it must
+  // be loaded from node_modules at runtime rather than compiled into the server
+  // bundle. Without this the listener silently fails to connect and every
+  // dashboard quietly falls back to the slow poll.
+  serverExternalPackages: ["pg"],
 
   async headers() {
     return [

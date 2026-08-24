@@ -127,10 +127,20 @@ function HistoryCard({ history }: { history: ReportDeliveryRow[] }) {
     setError(null);
     setRetrying(day);
     startRetry(async () => {
-      const res = await retryReportDelivery(day);
-      setRetrying(null);
-      if (res && "error" in res && res.error) setError(`${prettyDay(day)}: ${res.error}`);
-      else router.refresh();
+      try {
+        const res = await retryReportDelivery(day);
+        if (res && "error" in res && res.error) setError(`${prettyDay(day)}: ${res.error}`);
+        else router.refresh();
+      } catch {
+        // A thrown (not returned) error here is almost always a stale Server
+        // Action reference from a deploy that happened while this tab was open —
+        // the browser's bundle references an action id the new server doesn't
+        // know. Without this catch, `retrying` never clears and the button is
+        // stuck on "Sending…" forever with no way to tell what happened.
+        setError(`${prettyDay(day)}: This page is out of date — refresh and try again.`);
+      } finally {
+        setRetrying(null);
+      }
     });
   };
 
