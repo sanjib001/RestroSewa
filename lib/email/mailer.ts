@@ -124,15 +124,6 @@ export async function sendEmail(input: SendEmailInput): Promise<SendResult> {
 
   // The key decides the transport. Checked before the SMTP config so a host with
   // both set uses the one that can actually reach the internet.
-  // TEMP DIAGNOSTIC (2026-08-24): a DO redeploy was observed still hanging on
-  // Gmail SMTP for ~2 minutes (nodemailer's default connectionTimeout) despite
-  // RESEND_API_KEY being confirmed present in the container's env. This line
-  // exists only to prove, from the container logs, which branch actually runs —
-  // remove once that's confirmed.
-  console.log(
-    `[mailer] transport=${process.env.RESEND_API_KEY ? "resend" : "gmail"} ` +
-      `keyPresent=${Boolean(process.env.RESEND_API_KEY)} from=${process.env.MAIL_FROM ?? "(unset)"}`
-  );
   if (process.env.RESEND_API_KEY) return sendViaResend(input, to);
 
   const transport = getTransport();
