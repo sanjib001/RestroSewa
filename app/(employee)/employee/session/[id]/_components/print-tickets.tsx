@@ -697,7 +697,11 @@ export function SessionPrintButtons({
             at={at}
             items={billItems}
             customer={
-              session.type === "walk_in"
+              // Walk-in carries name/phone/address; a table bill's own customer
+              // block is name-only (see updateTableCustomerName) — the other two
+              // fields are simply always null there, so BillTicket's per-field
+              // `customer.phone && …` checks already print nothing for them.
+              session.type === "walk_in" || session.type === "table"
                 ? { name: session.customer_name, phone: session.customer_phone, address: session.customer_address }
                 : null
             }
