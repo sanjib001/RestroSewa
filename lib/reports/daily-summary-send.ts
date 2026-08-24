@@ -7,6 +7,7 @@ import {
 } from "./daily-summary";
 import { renderDailySummaryPdf } from "./daily-summary-pdf";
 import { sendEmail } from "@/lib/email/mailer";
+import { addBusinessDays, businessToday } from "@/lib/business-day";
 import type { ReportLogo } from "./pdf/report-document";
 
 // ─── Orchestrator: build → PDF → email → log ───────────────────────────────────
@@ -18,6 +19,14 @@ import type { ReportLogo } from "./pdf/report-document";
 
 /** Minimum gap between two UNATTENDED sends for the same failed (restaurant, day). */
 const RETRY_BACKOFF_MS = 30 * 60 * 1000;
+
+/**
+ * How far back the scheduler will still send a report on its own. A report
+ * normally leaves the moment its business day closes, so its age is 0 or 1 —
+ * this only ever bites a backlog that built up during an outage. Past that,
+ * sending is a decision, not a retry: use the admin Retry button.
+ */
+const MAX_UNATTENDED_AGE_DAYS = 2;
 
 export type SendOutcome =
   | { status: "sent"; recipients: string[] }
@@ -83,8 +92,44 @@ export async function sendDailySummary(
     .eq("period_type", "daily")
     .eq("period_key", businessDate)
     .maybeSingle();
-  if (!opts?.force && existing?.status === "sent") {
-    return { status: "skipped", reason: "already sent" };
+  // Two TERMINAL states: 'sent' because the report arrived, 'abandoned' because
+  // someone decided this day's report will never go out. Only the admin "Retry"
+  // button (force) reopens either — the scheduler never does.
+  if (!opts?.force && (existing?.status === "sent" || existing?.status === "abandoned")) {
+    return {
+      status: "skipped",
+      reason: existing.status === "sent" ? "already sent" : "abandoned",
+    };
+  }
+
+  // ── Stale-report guard ──────────────────────────────────────────────────────
+  // An outage that stops mail for several days would, the moment it is fixed,
+  // deliver every missed day at once — an owner opening their inbox to four
+  // "yesterday's summary" mails, the oldest of which is no longer news. Worse,
+  // the scheduler ticks every 15 minutes, so they all arrive within one tick of
+  // each other.
+  //
+  // Real case: DigitalOcean blocks outbound SMTP, so every report from
+  // 2026-08-21 failed. Restoring mail without this guard would have dumped the
+  // whole backlog on every owner.
+  //
+  // Normal operation is unaffected: a report leaves as soon as its business day
+  // closes, so its age is 0 or 1. Anything older has been failing for days and
+  // is a judgement call, which is what the Retry button is for.
+  //
+  // REPORT_SEND_FROM is the manual half of the same idea: a hard floor for
+  // one-off use after an outage, when the backlog is younger than the age guard
+  // but should still never go out. Set it and forget it — it only ever hides
+  // days that are already in the past. ISO dates compare correctly as strings.
+  if (!opts?.force) {
+    const floor = (process.env.REPORT_SEND_FROM || "").trim();
+    if (floor && businessDate < floor) {
+      return { status: "skipped", reason: `before REPORT_SEND_FROM (${floor})` };
+    }
+    const oldestAutoSendable = addBusinessDays(businessToday(closingHour), -MAX_UNATTENDED_AGE_DAYS);
+    if (businessDate < oldestAutoSendable) {
+      return { status: "skipped", reason: `too old to auto-send (before ${oldestAutoSendable})` };
+    }
   }
   // Auto-retry backoff. The scheduler ticks every 15 minutes so that a report
   // leaves the moment the day closes — but that also means a restaurant whose

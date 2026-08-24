@@ -128,7 +128,31 @@ async function main() {
       returning id`,
     [source.url, target.url]
   );
-  console.log(`\ncopied ${copied}/${objects.length} object(s); repointed ${updated.length} logo_url(s)`);
+  // Second pass: rows that are on NEITHER the source host nor the target. That
+  // happens whenever the destination's own public hostname changes — the rows
+  // were repointed correctly by an earlier run, and then the name they were
+  // pointed at moved. It happened for real at the 2026-08-21 cutover: the
+  // `*.testhrestrosewa` wildcard was deleted with the Vercel domain, leaving all
+  // six logos on a host that no longer resolved, and a plain re-run could not
+  // fix them because the swap above only matches the SOURCE prefix.
+  //
+  // Anchoring on the storage path rather than any particular host makes this
+  // idempotent for every future rename: whatever the URL used to say, the part
+  // from `/storage/v1/object/public/` onward is identical on all Supabase hosts.
+  const MARKER = "/storage/v1/object/public/";
+  const { rows: rehosted } = await dst.query(
+    `update restaurants
+        set logo_url = $1 || substring(logo_url from position($2 in logo_url))
+      where logo_url like '%' || $2 || '%'
+        and logo_url not like $1 || '%'
+      returning id`,
+    [target.url, MARKER]
+  );
+
+  console.log(
+    `\ncopied ${copied}/${objects.length} object(s); repointed ${updated.length} logo_url(s)` +
+      (rehosted.length ? `, re-hosted ${rehosted.length} from a stale hostname` : "")
+  );
 
   const { rows: left } = await dst.query(
     `select id, name, logo_url from restaurants where logo_url is not null and logo_url not like $1 || '%'`,

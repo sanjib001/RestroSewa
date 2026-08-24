@@ -210,6 +210,25 @@ async function main() {
       }
     }
     console.log(`\napplied ${pending.length} migration(s)`);
+
+    // PostgREST caches the schema and only rebuilds it on this signal. The
+    // hosted projects ship `pgrst_ddl_watch`/`pgrst_drop_watch` event triggers
+    // that fire it automatically; the self-hosted droplet has NO event triggers
+    // at all, so a migration there lands in the database and stays invisible to
+    // the API — `PGRST205 Could not find the table` on a table that plainly
+    // exists. Hit for real after 20260824000000_salary_cycles.sql.
+    //
+    // Sending it here covers every target: redundant where the event triggers
+    // already do it, essential where they do not. A failure is reported but not
+    // fatal — the migrations are already committed, and refusing to exit 0 over
+    // a cache hint would misreport the run.
+    try {
+      await c.query("notify pgrst, 'reload schema'");
+      console.log("schema cache reload signalled");
+    } catch (e) {
+      console.error(`\nWARNING: could not signal a PostgREST schema reload: ${e.message}`);
+      console.error("The migrations ARE applied. If the API 404s on a new table, restart PostgREST.");
+    }
   }
 
   else {

@@ -1262,3 +1262,226 @@ liability on DEV during testing before it was spotted and restored.
 
 **Applied to DEV and DO. NOT applied to hosted PRODUCTION** — that is the user's deploy call:
 `node scripts/migrate.mjs up --prod --yes`.
+
+---
+
+## 2026-08-21 — Production → DigitalOcean data transfer (the cutover copy)
+
+`prod → hrestrosewa` full data transfer, verified end to end. **`verify-parity.mjs`:
+ALL CHECKS PASSED.**
+
+### Two blockers found and fixed before any data moved
+
+**1. `--http` migrations create tables with no grants.** Kong's `/pg/query`
+(postgres-meta) connects as `supabase_admin`, but every `pg_default_acl` rule on that
+database — including the one `20260801000000_service_role_grants.sql` wrote — is filed
+under `postgres`. Default privileges are per-granting-role, so a table created over
+`--http` matched no rule and came out with `relacl = NULL`:
+
+    extra_expenses         owner=postgres        service_role=arwd   ← tunnel era
+    salary_cycles          owner=supabase_admin  relacl=NULL         ← --http era
+    staff_attendance_days  owner=supabase_admin  relacl=NULL         ← --http era
+
+That is the exact failure `20260801000000` exists to prevent, re-entering through a door
+that did not exist when it was written. It also left those tables unmaintainable over the
+SSH tunnel, which connects as `postgres` — and postgres cannot `ALTER` a relation owned by
+supabase_admin.
+
+Fixed by **`20260824100000_service_role_grants_http.sql`**: reassigns every public relation
+to `postgres`, re-grants to `service_role`, and files an `alter default privileges` rule
+under whichever role applies it, so it self-heals over either route. Verified a no-op on
+hosted production (53 relations already postgres-owned, grantees still exactly
+`postgres` + `service_role`, liabilities unchanged at 22,800 / 30,000).
+
+**2. PostgREST's schema cache never reloads on the droplet.** Hosted Supabase ships
+`pgrst_ddl_watch` / `pgrst_drop_watch`; the droplet has **zero** event triggers. So
+`salary_cycles` and `payroll_cycle_sheet` returned `PGRST205 / PGRST202 Could not find …
+in the schema cache` from a database where they plainly existed. `scripts/migrate.mjs`
+now sends `notify pgrst, 'reload schema'` after a successful `up` — redundant on hosted,
+essential on DO.
+
+### The transfer
+
+| step | result |
+|---|---|
+| `clone-db.mjs --reset --yes` | **29,867 rows** across 51 public tables + auth |
+| `copy-storage.mjs` | 6/6 logos, 6 `logo_url` repointed, all fetch 200 at the exact byte counts |
+| `verify-parity.mjs` | 8/8 structure · all row counts · **32/32 derived values** |
+
+The derived-value checks are the ones that matter: `finance_report`,
+`finance_transactions`, `dashboard_stats` and `stock_report` recomputed independently on
+each side for all 8 restaurants and agreed. Row counts alone would pass on a database
+whose foreign keys all point at the wrong parents.
+
+Auth carried over intact — `md5` over `(id, encrypted_password, email)` for all 60 users
+is **identical** on both sides, 0 blank passwords, 0 unconfirmed, 0 orphaned
+`restaurant_users.auth_user_id`.
+
+### Still open (not ours to do)
+
+- **Production was live throughout.** Four tables drifted between the dry run and the copy
+  (`products` 349→351, `purchases` 367→369, `purchase_items` 696→700, `vendor_payments`
+  13→14). The clone is repeatable and cheap — **freeze writes and re-run it at the actual
+  flip**.
+- **App redeploy.** The DO build predates commit `ec407c7`, so the salary-cycle UI is not
+  yet on it.
+- **`pg_cron` daily-summary is not wired on this stack** (extension not installed, no
+  `cron.job` rows) while hosted production's job is **active** on `*/15 * * * *`. Left
+  alone deliberately: it emails real owners. The clone did bring `report_deliveries`
+  across, so DO's dedupe cannot re-send history once it is switched on.
+
+---
+
+## 2026-08-21 — domain cutover: Vercel → Coolify
+
+## ✅ DOMAIN CUTOVER 2026-08-21 — app moved off Vercel, Kong router rebuilt
+
+The production domain `hrestrosewa.leafclutch.com.np` now points **A → 139.59.237.233**
+with a valid Let's Encrypt cert, served by Coolify/Traefik. No Vercel headers remain.
+Side benefit: it is a plain A record with **no CNAME**, so the WebKit CNAME-cloaking
+cookie cap that signed iPhone staff out is gone — see [[ios-pwa-signout]].
+
+**The trap:** deleting the Vercel domain also removed the
+`*.testhrestrosewa.leafclutch.com.np` wildcard, but `hrs-kong`'s docker labels still
+carried a rule for `supabase.testhrestrosewa.leafclutch.com.np`. The new name
+`supabase.hrestrosewa.leafclutch.com.np` resolved to the droplet with **no router**, so
+Traefik answered `CN=TRAEFIK DEFAULT CERT` and every browser-side Supabase call, all six
+logos, and the `--http` tooling died at once. The app itself kept returning 200 because
+its server side reaches Kong over the Docker network — so "the site is up" proved nothing.
+
+**Fixed via the file provider**, not labels (labels mean recreating the container):
+`/data/coolify/proxy/dynamic/hrs-kong-prod.yaml` → `http://hrs-kong:8000`, entryPoints
+http/https, `certResolver: letsencrypt`. Cert issued within ~30s. Backend addressed by
+CONTAINER NAME; proxy and hrs-kong share the `coolify` network.
+⚠️ **Two sources of truth** — if the FQDN is ever set in the Coolify UI for hrs-kong,
+DELETE that file. The stale label rule for the dead host is harmless (never matches) but
+worth cleaning up the same way.
+
+**`copy-storage.mjs` gained a second rewrite pass.** Its host swap only matched the
+SOURCE prefix, so rows already repointed at the old DO host could not be fixed by a
+re-run — it reported `repointed 0` and listed all six under "still pointing elsewhere".
+It now also anchors on `/storage/v1/object/public/` and re-hosts any stale hostname,
+which is idempotent for every future rename. All 6 logos verified 200 at their exact byte
+counts, and `/_next/image` serves them (200, optimised 403KB → 16KB) while still
+refusing an unlisted host (400).
+
+
+---
+
+## 🚨 CUTOVER IS LIVE — DO IS THE SYSTEM OF RECORD (2026-08-21)
+
+Verified by write timestamps, not assumption:
+
+    production  last payment 2026-08-20 20:39:17Z  (₹250)
+    DigitalOcean     session 2026-08-20 22:10:12Z
+    DigitalOcean     payment 2026-08-20 22:10:32Z  (₹980)
+
+Production stopped taking writes at **20:39**. Everything after it landed on DO, because
+the domain now resolves there. DO leads by +1 session, +1 order, +3 order items,
++1 payment, +3 notifications.
+
+### ⛔ NEVER run `clone-db.mjs --reset` against DO again
+The earlier "freeze and re-clone at the final flip" advice is now **DANGEROUS** and
+withdrawn. A reset would delete real revenue — a live session and a ₹980 payment already.
+If anything still needs pulling across from hosted, it has to be a targeted, additive
+backfill of the 20:39→22:10 window, never a wholesale replace.
+
+### The daily-summary emails did NOT stop — the trigger just lives in the wrong database
+Earlier note (that owners would silently stop receiving reports) was **wrong**. Hosted
+production's pg_cron job resolves `app_base_url = https://hrestrosewa.leafclutch.com.np`,
+which now points at the DO app — so the hosted database is driving the DO app's cron
+route. Observed working: the 22:00 run reached DO and logged `skipped` for every
+restaurant, correctly, because the cloned `report_deliveries` already recorded today as
+sent. No duplicate emails.
+
+**The real risk is the reverse of what was assumed:** the *trigger* still lives in hosted
+Supabase. Decommission that project and the daily emails stop silently, with nothing on DO
+to take over — `pg_cron` is still not installed there. Install it and move the job before
+retiring hosted.
+
+
+---
+
+## 📧 MAIL BROKE AT THE CUTOVER — DigitalOcean blocks all outbound SMTP (2026-08-22)
+
+Every daily-summary report for `2026-08-21` failed: **status `failed`, 90 attempts,
+`Connection timeout`**. Days up to 2026-08-20 are all `sent` — those left from Vercel.
+The first day that had to send from the droplet failed, so no owner has had a report since.
+
+**Root cause, proven by socket test from the droplet (not inferred):**
+
+    smtp.gmail.com:465        TIMEOUT 8008ms   <- packets dropped
+    smtp.gmail.com:587        TIMEOUT 8007ms
+    smtp.gmail.com:25         TIMEOUT 8008ms
+    smtp.sendgrid.net:587     TIMEOUT 8008ms
+    smtp-relay.brevo.com:587  TIMEOUT 8007ms
+    api.resend.com:443        OPEN      82ms
+    1.1.1.1:443               OPEN       1ms
+
+Every SMTP port to EVERY provider, not just Gmail. Not the droplet's firewall —
+`ufw` default outgoing is `allow`. This is DigitalOcean's network-level SMTP block.
+**nodemailer can never deliver from this droplet.** Do not debug Gmail credentials.
+
+⚠️ Beware `/dev/tcp` for this: it reported 443 blocked while `curl` got 200 on the same
+host. Use a real socket (`python3` socket.connect) or curl, never bash's /dev/tcp.
+
+### Fix: Resend over HTTPS, chosen by the user 2026-08-22
+`lib/email/mailer.ts` now has TWO transports and picks on `RESEND_API_KEY`:
+Resend (HTTPS 443) when set, Gmail SMTP otherwise. SMTP is deliberately KEPT so a local
+machine or any non-blocking host keeps working with no env change.
+Request shaping lives in `lib/email/resend-payload.ts` — zero runtime imports so
+`node --test` can load it (see [[node-test-alias-limit]]); 13 tests, 146 total.
+Uses `fetch`, no new npm dependency.
+
+Two details that matter: `MAIL_FROM` must be on a Resend-VERIFIED domain (a gmail.com
+sender is rejected, so GMAIL_USER is not a fallback), and a non-429 4xx fails immediately
+rather than retrying — a bad key or unverified domain would otherwise write the same
+error three times per run.
+
+Transport path proven from the droplet with a dummy key:
+`HTTP 401 in 0.39s → {"statusCode":401,...,"message":"API key is invalid"}` — exactly the
+shape `parseResendError` handles.
+
+### Still needed from the user
+1. resend.com account, verify a domain, create an API key.
+2. Coolify app env: `RESEND_API_KEY` + `MAIL_FROM`.
+3. **Redeploy** — the running build predates this code, so a restart is not enough.
+4. THEN clear the `failed` rows for 2026-08-21 onward so the scheduler re-sends the
+   backlog (user chose to send the missed days). Do NOT clear them before mail works —
+   the scheduler retries ~2×/hour and would just inflate `attempts`.
+
+
+### Backlog decision REVERSED 2026-08-22 — do not send the missed days
+
+User: *"if resending left mail is a issue then ignore left mail and fix other things
+for future mailing."* So 2026-08-21 onward is written off; only future reports matter.
+
+Two guards added to `lib/reports/daily-summary-send.ts`, both bypassed by the admin
+Retry button (`force`) so a specific day can still be sent deliberately:
+
+1. **`abandoned` is now a TERMINAL status**, alongside `sent`. The scheduler skips it
+   forever. ⚠️ A build that predates this treats `abandoned` as unknown, sends, fails, and
+   writes `failed` back — so never mark rows abandoned until the new build is running.
+2. **Stale-report guard**, `MAX_UNATTENDED_AGE_DAYS = 2`. A report leaves as its business
+   day closes, so its normal age is 0–1; 2 is the smallest value that cannot block normal
+   operation. Note this does NOT cover the 2026-08-21 backlog — it was only 1 day old.
+3. **`REPORT_SEND_FROM=YYYY-MM-DD`** (env, optional) — a hard floor for one-off use after
+   an outage, for exactly the case the age guard is too loose for. This is what makes the
+   fix race-free in ONE deploy: no DB surgery, no window where the scheduler could fire
+   before the rows are marked.
+
+### The remaining future-mailing risk: the trigger is in the WRONG DATABASE
+Hosted production's `pg_cron` job is what drives the DO app's cron route — it resolves
+`app_base_url = https://hrestrosewa.leafclutch.com.np`, which now points at DO. **Retire
+the hosted Supabase project and daily mail stops silently**, with nothing on DO to
+take over.
+
+Feasibility checked on the droplet, so this is ready to do when wanted:
+- `shared_preload_libraries` already includes **pg_cron AND pg_net** — no Postgres restart
+  needed, just `create extension`.
+- ⚠️ `cron.database_name = postgres`, but the app's database is `hrestrosewa`. pg_cron only
+  runs jobs in the database it is pointed at, so the job must be created in **`postgres`**,
+  not in the app DB. That is fine — the job is only an HTTP POST.
+- ⚠️ That `postgres` database is SHARED with the sibling PragyaOS stack. Not touched
+  without explicit authorization — see [[droplet-resource-map]].
+
