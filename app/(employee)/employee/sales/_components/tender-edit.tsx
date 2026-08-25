@@ -16,6 +16,11 @@ const num = (s: string) => (s.trim() === "" ? 0 : parseFloat(s));
 export function TenderEditButton({ paymentId, onEdited }: { paymentId: string; onEdited: () => void }) {
   const [open, setOpen] = useState(false);
   const [total, setTotal] = useState(0);
+  // What was already settled by a room advance — not editable here, so the split
+  // below only ever has to add up to `editable` (total − advance), exactly what
+  // the server itself validates against.
+  const [advance, setAdvance] = useState(0);
+  const [editable, setEditable] = useState(0);
   const [cash, setCash] = useState("");
   const [online, setOnline] = useState("");
   const [card, setCard] = useState("");
@@ -26,6 +31,8 @@ export function TenderEditButton({ paymentId, onEdited }: { paymentId: string; o
     const res = await getPaymentTender(paymentId);
     if ("error" in res) { setLoadError(res.error); setOpen(true); return; }
     setTotal(res.total);
+    setAdvance(res.advance);
+    setEditable(res.editable);
     setCash(res.cash ? String(res.cash) : "");
     setOnline(res.online ? String(res.online) : "");
     setCard(res.card ? String(res.card) : "");
@@ -33,7 +40,7 @@ export function TenderEditButton({ paymentId, onEdited }: { paymentId: string; o
   };
 
   const sum = num(cash) + num(online) + num(card);
-  const matches = Math.abs(sum - total) < 0.01;
+  const matches = Math.abs(sum - editable) < 0.01;
   const anyNegative = num(cash) < 0 || num(online) < 0 || num(card) < 0;
   const valid = !loadError && matches && !anyNegative;
 
@@ -80,13 +87,23 @@ export function TenderEditButton({ paymentId, onEdited }: { paymentId: string; o
               <span style={{ color: "var(--color-ink-mute)" }}>Bill total</span>
               <span className="tabular-nums font-medium" style={{ color: "var(--color-ink)" }}>{fmt(total)}</span>
             </div>
+            {advance > 0 && (
+              <div className="flex items-center justify-between text-sm">
+                <span style={{ color: "var(--color-ink-mute)" }}>Already settled by advance</span>
+                <span className="tabular-nums" style={{ color: "var(--color-ink-mute)" }}>−{fmt(advance)}</span>
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               {field("Cash", cash, setCash)}
               {field("Online", online, setOnline)}
               {field("Card", card, setCard)}
             </div>
             <p className="text-xs" style={{ color: matches ? "var(--color-ink-mute)" : "var(--color-ruby)" }}>
-              {matches ? "Splits add up to the total." : `Cash + Online + Card must equal ${fmt(total)} (now ${fmt(sum)}).`}
+              {matches
+                ? advance > 0
+                  ? `Splits add up to the ${fmt(editable)} left after the advance.`
+                  : "Splits add up to the total."
+                : `Cash + Online + Card must equal ${fmt(editable)}${advance > 0 ? " (the bill total less the advance)" : ""} (now ${fmt(sum)}).`}
             </p>
           </div>
         )}

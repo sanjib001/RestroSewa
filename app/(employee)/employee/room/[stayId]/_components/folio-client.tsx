@@ -9,9 +9,13 @@ import {
   removeRoomCharge,
   setRoomPriceShift,
 } from "@/app/actions/rooms";
-import type { RoomFolioView } from "@/app/actions/rooms";
-import { removeRoomAdvance } from "@/app/actions/security";
+import type { RoomFolioView, RoomAdvance } from "@/app/actions/rooms";
+import { removeRoomAdvance, updateRoomAdvance } from "@/app/actions/security";
 import { AdvanceFields } from "@/app/(employee)/employee/_components/advance-fields";
+import type { AdvanceMethod } from "@/app/(employee)/employee/_components/advance-fields";
+import { SecurityPinDialog } from "@/components/security-pin-dialog";
+import { PaymentMethodPicker, splitIsValid } from "@/components/ui/payment-method-picker";
+import { Input } from "@/components/ui/input";
 import { searchCreditCustomers } from "@/app/actions/credits";
 import type { CreditCustomer } from "@/app/actions/credits";
 import type { SessionDetail } from "@/app/actions/pos";
@@ -30,7 +34,7 @@ import { folioToBill } from "@/lib/billing/room-bill";
 import { formatBillNumber, billNumberLabel } from "@/lib/billing/bill-number";
 import { billMethodLabel } from "@/lib/billing/payment-method";
 import {
-  ArrowLeft, BedDouble, Clock, Lock, Plus, Printer, Trash2, User, UtensilsCrossed, Wallet, X, XCircle,
+  ArrowLeft, BedDouble, Clock, Lock, Pencil, Plus, Printer, Trash2, User, UtensilsCrossed, Wallet, X, XCircle,
 } from "lucide-react";
 
 const rupee = (n: number) =>
@@ -387,6 +391,123 @@ function RemoveAdvanceButton({ advanceId }: { advanceId: string }) {
         </span>
       )}
     </div>
+  );
+}
+
+/**
+ * Correcting an advance already on file — most often the payment method typed
+ * wrong at the desk (a deposit that actually arrived online, recorded as cash).
+ * Owner-only AND the Security PIN, same lane as removing one: this rewrites
+ * money already counted into a day's cash-in-hand, with no bill to reconcile
+ * the correction against.
+ *
+ * A refund row (`amount < 0`) is edited in the same positive numbers a deposit
+ * is — the sign is reapplied from the row itself on submit, exactly as
+ * `updateExtraExpense` does for a saving withdrawal, so retyping the amount can
+ * never flip a deposit into a refund or back by accident.
+ */
+function EditAdvanceButton({ advance }: { advance: RoomAdvance }) {
+  const [open, setOpen] = useState(false);
+  const isRefund = advance.amount < 0;
+  const magnitude = Math.abs(advance.amount);
+
+  const [amount, setAmount] = useState(String(magnitude));
+  const [method, setMethod] = useState<AdvanceMethod>((advance.method as AdvanceMethod) || "cash");
+  const [cash, setCash] = useState(advance.method === "mixed" ? String(Math.abs(advance.cash)) : "");
+  const [online, setOnline] = useState(advance.method === "mixed" ? String(Math.abs(advance.online)) : "");
+
+  const amountNum = parseFloat(amount) || 0;
+  const valid = amountNum > 0 && (method !== "mixed" || splitIsValid("mixed", amountNum, cash, online));
+
+  const openDialog = () => {
+    setAmount(String(magnitude));
+    setMethod((advance.method as AdvanceMethod) || "cash");
+    setCash(advance.method === "mixed" ? String(Math.abs(advance.cash)) : "");
+    setOnline(advance.method === "mixed" ? String(Math.abs(advance.online)) : "");
+    setOpen(true);
+  };
+
+  // Cash / Online / Card for a single method; the two-way split for Mixed.
+  const resolvedSplit = () => {
+    if (method === "cash") return { cash: amountNum, online: 0, card: 0 };
+    if (method === "online") return { cash: 0, online: amountNum, card: 0 };
+    if (method === "card") return { cash: 0, online: 0, card: amountNum };
+    return { cash: parseFloat(cash) || 0, online: parseFloat(online) || 0, card: 0 };
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={openDialog}
+        aria-label="Edit this advance"
+        style={{ color: "var(--color-ink-mute)" }}
+      >
+        <Pencil size={13} />
+      </button>
+
+      <SecurityPinDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        onSuccess={() => setOpen(false)}
+        title={isRefund ? "Edit refund" : "Edit advance"}
+        description="Correct the amount or how it was paid — most often the payment method."
+        confirmLabel="Save"
+        extraValid={valid}
+        onConfirm={(pin) => {
+          const s = resolvedSplit();
+          const sign = isRefund ? -1 : 1;
+          return updateRoomAdvance(pin, advance.id, {
+            amount: amountNum * sign,
+            cash: s.cash * sign,
+            online: s.online * sign,
+            card: s.card * sign,
+            method,
+          });
+        }}
+      >
+        <div className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1.5">
+            <span
+              className="text-xs uppercase tracking-wide"
+              style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}
+            >
+              Amount
+            </span>
+            <Input
+              type="number"
+              min="0.01"
+              step="0.01"
+              inputMode="decimal"
+              value={amount}
+              onChange={(e) => {
+                setAmount(e.target.value);
+                setCash("");
+                setOnline("");
+              }}
+            />
+          </label>
+
+          <PaymentMethodPicker
+            methods={["cash", "online", "card", "mixed"]}
+            value={method}
+            onChange={(m) => {
+              setMethod(m as AdvanceMethod);
+              setCash("");
+              setOnline("");
+            }}
+            total={amountNum}
+            cash={cash}
+            online={online}
+            onSplitChange={(s) => {
+              setCash(s.cash);
+              setOnline(s.online);
+            }}
+            mixedLabel="Cash + Online"
+          />
+        </div>
+      </SecurityPinDialog>
+    </>
   );
 }
 
@@ -1370,7 +1491,12 @@ export function FolioClient({
                 <span className="text-sm tabular" style={{ color: "var(--color-ink)" }}>
                   {rupee(a.amount)}
                 </span>
-                {open && canEditAdvance && <RemoveAdvanceButton advanceId={a.id} />}
+                {open && canEditAdvance && (
+                  <div className="flex items-center gap-2">
+                    <EditAdvanceButton advance={a} />
+                    <RemoveAdvanceButton advanceId={a.id} />
+                  </div>
+                )}
               </div>
             ))
           )}
