@@ -67,6 +67,9 @@ export function PaidBillButton({ paymentId }: { paymentId: string }) {
             sections={bill.sections}
             stay={bill.stay}
             discount={bill.discount}
+            advancePaid={bill.advancePaid}
+            advanceCash={bill.advanceCash}
+            advanceOnline={bill.advanceOnline}
             payment={{
               method: billMethodLabel(bill.method),
               cashier: bill.cashier_name,

@@ -11,6 +11,9 @@ import {
   setOpeningBalance,
 } from "@/app/actions/finance";
 import type { ActionResult, OpeningBalance } from "@/app/actions/finance";
+import { addExtraIncome, listExtraIncome } from "@/app/actions/income";
+import type { ExtraIncome } from "@/app/actions/income";
+import { updateExtraIncome, removeExtraIncome } from "@/app/actions/security";
 import { getPayrollSummary } from "@/app/actions/payroll";
 import {
   PERIOD_LABEL,
@@ -31,8 +34,11 @@ import { useRealtime } from "@/lib/realtime/use-realtime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "../../_components/modal";
-import { Settings2, TriangleAlert, UserPlus } from "lucide-react";
+import { SecurityPinDialog } from "@/components/security-pin-dialog";
+import { PaymentMethodPicker, splitIsValid } from "@/components/ui/payment-method-picker";
+import { Plus, Settings2, TriangleAlert, UserPlus, Pencil, X } from "lucide-react";
 import { ImportCreditForm } from "./import-credit-form";
+import { formatDateTime } from "@/lib/format-time";
 
 const money = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 const money2 = (n: number) =>
@@ -423,6 +429,305 @@ function OpeningForm({ current, onDone }: { current: OpeningBalance; onDone: () 
   );
 }
 
+// ── Extra income ────────────────────────────────────────────────────────────────
+
+type IncomeMethod = "cash" | "online" | "card" | "mixed";
+
+function AddIncomeForm({ onDone }: { onDone: () => void }) {
+  const [state, action, pending] = useActionState<ActionResult, FormData>(addExtraIncome, null);
+  const [method, setMethod] = useState<IncomeMethod>("cash");
+  const [amount, setAmount] = useState("");
+  const [cash, setCash] = useState("");
+  const [online, setOnline] = useState("");
+
+  const wasPending = useRef(false);
+  useEffect(() => {
+    if (wasPending.current && !pending && !state?.error) onDone();
+    wasPending.current = pending;
+  }, [pending, state, onDone]);
+
+  const amountNum = parseFloat(amount) || 0;
+  const mixedOk = method !== "mixed" || amountNum === 0 || splitIsValid("mixed", amountNum, cash, online);
+  const valid = amountNum > 0 && mixedOk;
+
+  return (
+    <form action={action} className="flex flex-col gap-3">
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="i_desc" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
+          Description / reason
+        </label>
+        <Input id="i_desc" name="description" placeholder="e.g. Miscellaneous income" required maxLength={200} />
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="i_amount" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
+          Amount (₹)
+        </label>
+        <Input
+          id="i_amount"
+          name="amount"
+          type="number"
+          min="0.01"
+          step="0.01"
+          placeholder="0.00"
+          value={amount}
+          onChange={(e) => {
+            setAmount(e.target.value);
+            setCash("");
+            setOnline("");
+          }}
+          required
+        />
+      </div>
+
+      <input type="hidden" name="method" value={method} />
+      <input type="hidden" name="cash_amount" value={method === "mixed" ? cash : ""} />
+      <input type="hidden" name="online_amount" value={method === "mixed" ? online : ""} />
+
+      <PaymentMethodPicker
+        methods={["cash", "online", "card", "mixed"]}
+        value={method}
+        onChange={(m) => {
+          setMethod(m as IncomeMethod);
+          setCash("");
+          setOnline("");
+        }}
+        total={amountNum}
+        cash={cash}
+        online={online}
+        onSplitChange={(s) => {
+          setCash(s.cash);
+          setOnline(s.online);
+        }}
+        mixedLabel="Cash + Online"
+      />
+
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="i_when" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
+          Date &amp; time
+        </label>
+        <input
+          id="i_when"
+          name="occurred_at"
+          type="datetime-local"
+          defaultValue={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
+          className="w-full text-sm rounded-lg border px-3 py-2"
+          style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline-input)", color: "var(--color-ink)" }}
+        />
+        <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+          Defaults to now. Change it to log income received earlier.
+        </p>
+      </div>
+
+      {state?.error && (
+        <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
+          {state.error}
+        </p>
+      )}
+
+      <Button type="submit" variant="primary" disabled={pending || !valid}>
+        {pending ? "Saving…" : "Add income"}
+      </Button>
+    </form>
+  );
+}
+
+/**
+ * One recorded entry, with the SAME correction lane every other settled financial
+ * row in this app uses: admin-only, Security-PIN-gated edit/delete
+ * (updateExtraIncome/removeExtraIncome), audit-logged server-side. Not a fresh
+ * design — it is `EditAdvanceButton`/`RemoveAdvanceButton` from the room folio,
+ * re-shaped for a flat amount instead of a room stay's advance.
+ */
+function IncomeRow({ entry, canManage, onChanged }: { entry: ExtraIncome; canManage: boolean; onChanged: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [removing, setRemoving] = useState(false);
+
+  const [description, setDescription] = useState(entry.description);
+  const [amount, setAmount] = useState(String(entry.amount));
+  const [method, setMethod] = useState<IncomeMethod>((entry.method as IncomeMethod) || "cash");
+  const [cash, setCash] = useState(entry.method === "mixed" ? String(entry.cash) : "");
+  const [online, setOnline] = useState(entry.method === "mixed" ? String(entry.online) : "");
+
+  const [removePin, setRemovePin] = useState("");
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
+
+  const amountNum = parseFloat(amount) || 0;
+  const valid =
+    description.trim().length > 0 &&
+    amountNum > 0 &&
+    (method !== "mixed" || splitIsValid("mixed", amountNum, cash, online));
+
+  const openEdit = () => {
+    setDescription(entry.description);
+    setAmount(String(entry.amount));
+    setMethod((entry.method as IncomeMethod) || "cash");
+    setCash(entry.method === "mixed" ? String(entry.cash) : "");
+    setOnline(entry.method === "mixed" ? String(entry.online) : "");
+    setEditing(true);
+  };
+
+  const resolvedSplit = () => {
+    if (method === "cash") return { cash: amountNum, online: 0, card: 0 };
+    if (method === "online") return { cash: 0, online: amountNum, card: 0 };
+    if (method === "card") return { cash: 0, online: 0, card: amountNum };
+    return { cash: parseFloat(cash) || 0, online: parseFloat(online) || 0, card: 0 };
+  };
+
+  return (
+    <div
+      className="flex items-center gap-2 px-4 py-2.5 border-t"
+      style={{ borderColor: "var(--color-hairline)" }}
+    >
+      <div className="flex-1 min-w-0">
+        <p className="text-sm truncate" style={{ color: "var(--color-ink)" }}>
+          {entry.description}
+          <span className="text-xs ml-1.5" style={{ color: "var(--color-ink-mute)" }}>
+            {METHOD_LABEL[entry.method] ?? entry.method}
+          </span>
+        </p>
+        <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+          {formatDateTime(entry.createdAt)}
+          {entry.createdByName ? ` · ${entry.createdByName}` : ""}
+          {entry.updatedAt ? " · corrected" : ""}
+        </p>
+      </div>
+      <span className="text-sm tabular-nums" style={{ color: "var(--color-ink)" }}>
+        {money2(entry.amount)}
+      </span>
+      {canManage && (
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button type="button" onClick={openEdit} aria-label="Edit this income entry" style={{ color: "var(--color-ink-mute)" }}>
+            <Pencil size={13} />
+          </button>
+          {removing ? (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="password"
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={4}
+                placeholder="PIN"
+                value={removePin}
+                onChange={(e) => setRemovePin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                className="h-8 w-16 rounded-sm border px-2 text-xs text-right tracking-[0.3em]"
+                style={{ borderColor: "var(--color-hairline-input)", background: "var(--color-canvas)", color: "var(--color-ink)" }}
+              />
+              <button
+                type="button"
+                disabled={removeBusy || removePin.length !== 4}
+                onClick={async () => {
+                  setRemoveBusy(true);
+                  const res = await removeExtraIncome(removePin, entry.id);
+                  if (res && "error" in res) {
+                    setRemoveError(res.error);
+                    setRemovePin("");
+                  } else {
+                    setRemoving(false);
+                    setRemovePin("");
+                    setRemoveError(null);
+                    onChanged();
+                  }
+                  setRemoveBusy(false);
+                }}
+                className="text-xs px-2 py-1 rounded-pill border"
+                style={{ borderColor: "var(--color-ruby)", color: "var(--color-ruby)" }}
+              >
+                {removeBusy ? "…" : "Remove"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setRemoving(false);
+                  setRemovePin("");
+                  setRemoveError(null);
+                }}
+                style={{ color: "var(--color-ink-mute)" }}
+              >
+                <X size={13} />
+              </button>
+              {removeError && (
+                <span className="text-xs" style={{ color: "var(--color-ruby)" }}>{removeError}</span>
+              )}
+            </div>
+          ) : (
+            <button type="button" onClick={() => setRemoving(true)} aria-label="Remove this income entry" style={{ color: "var(--color-ink-mute)" }}>
+              <X size={13} />
+            </button>
+          )}
+        </div>
+      )}
+
+      <SecurityPinDialog
+        open={editing}
+        onClose={() => setEditing(false)}
+        onSuccess={() => {
+          setEditing(false);
+          onChanged();
+        }}
+        title="Edit income entry"
+        description="Correct the description, amount or how it was received."
+        confirmLabel="Save"
+        extraValid={valid}
+        onConfirm={(pin) => {
+          const s = resolvedSplit();
+          return updateExtraIncome(pin, entry.id, {
+            description: description.trim(),
+            amount: amountNum,
+            cash: s.cash,
+            online: s.online,
+            card: s.card,
+            method,
+          });
+        }}
+      >
+        <div className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
+              Description
+            </span>
+            <Input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={200} />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
+              Amount
+            </span>
+            <Input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={amount}
+              onChange={(e) => {
+                setAmount(e.target.value);
+                setCash("");
+                setOnline("");
+              }}
+            />
+          </label>
+          <PaymentMethodPicker
+            methods={["cash", "online", "card", "mixed"]}
+            value={method}
+            onChange={(m) => {
+              setMethod(m as IncomeMethod);
+              setCash("");
+              setOnline("");
+            }}
+            total={amountNum}
+            cash={cash}
+            online={online}
+            onSplitChange={(s) => {
+              setCash(s.cash);
+              setOnline(s.online);
+            }}
+            mixedLabel="Cash + Online"
+          />
+        </div>
+      </SecurityPinDialog>
+    </div>
+  );
+}
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export function FinanceClient({
@@ -431,6 +736,7 @@ export function FinanceClient({
   initialPurchases,
   initialPayroll,
   initialLedger,
+  initialIncome,
   canManage,
   showRooms = false,
 }: {
@@ -439,6 +745,7 @@ export function FinanceClient({
   initialPurchases: FinancePurchase[];
   initialPayroll: PayrollSummary;
   initialLedger: FinanceTransaction[];
+  initialIncome: ExtraIncome[];
   canManage: boolean;
   /** Hotel side of the sheet. False for a restaurant-only client, which has no rooms
    *  and so no room sales and no deposits — the blocks are not rendered at all. */
@@ -449,6 +756,7 @@ export function FinanceClient({
   const [purchases, setPurchases] = useState(initialPurchases);
   const [payroll, setPayroll] = useState(initialPayroll);
   const [ledger, setLedger] = useState(initialLedger);
+  const [income, setIncome] = useState(initialIncome);
   const [period, setPeriod] = useState<FinancePeriod>(initial.period);
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -456,21 +764,24 @@ export function FinanceClient({
   const [exporting, setExporting] = useState(false);
   const [settingOpening, setSettingOpening] = useState(false);
   const [importingCredit, setImportingCredit] = useState(false);
+  const [addingIncome, setAddingIncome] = useState(false);
 
   const load = useCallback((p: FinancePeriod, from?: string, to?: string) => {
     startTransition(async () => {
       try {
         const args = { period: p, from: from ?? null, to: to ?? null };
-        const [next, list, pay, tx] = await Promise.all([
+        const [next, list, pay, tx, inc] = await Promise.all([
           getFinanceReport(args),
           getPeriodPurchases(args),
           getPayrollSummary(args),
           getFinanceTransactions(args),
+          listExtraIncome(args),
         ]);
         setReport(next);
         setPurchases(list);
         setPayroll(pay);
         setLedger(tx);
+        setIncome(inc);
       } catch {
         // keep the last known report on a transient failure
       }
@@ -572,6 +883,11 @@ export function FinanceClient({
           {canManage && (
             <Button variant="secondary" size="sm" onClick={() => setImportingCredit(true)}>
               <UserPlus size={14} /> Import credit
+            </Button>
+          )}
+          {canManage && (
+            <Button variant="secondary" size="sm" onClick={() => setAddingIncome(true)}>
+              <Plus size={14} /> Add income
             </Button>
           )}
           <Button variant="secondary" size="sm" onClick={exportCsv} disabled={exporting}>
@@ -863,6 +1179,30 @@ export function FinanceClient({
             ]}
             total={{ label: "Held at period end", value: report.closingAdvancesHeld }}
           />
+        )}
+
+        {/* Money in that is NOT a sale. Its OWN section, never a Sales line — the
+            same reasoning Room Advances gets, above — so the two can never be
+            confused for what the business actually sold. */}
+        {(report.incomeTotal > 0 || income.length > 0) && (
+          <Section
+            title={`Extra income · ${periodLabel}`}
+            note="Misc/service/other income received by hand — not a sale"
+            rows={[
+              ...(report.incomeCash > 0 ? [{ label: "Cash", value: report.incomeCash }] : []),
+              ...(report.incomeOnline > 0 ? [{ label: "Online", value: report.incomeOnline }] : []),
+              ...(report.incomeCard > 0 ? [{ label: "Card", value: report.incomeCard }] : []),
+            ]}
+            total={{ label: "Total extra income", value: report.incomeTotal, tone: "#1a7a4a" }}
+          >
+            {income.length > 0 && (
+              <div className="border-t" style={{ borderColor: "var(--color-hairline)" }}>
+                {income.map((i) => (
+                  <IncomeRow key={i.id} entry={i} canManage={canManage} onChanged={resync} />
+                ))}
+              </div>
+            )}
+          </Section>
         )}
 
         {/* Everything that left the business, gathered in one place. The figures
@@ -1188,6 +1528,15 @@ export function FinanceClient({
         subtitle="The money you started with"
       >
         <OpeningForm current={opening} onDone={() => { setSettingOpening(false); refreshAll(); }} />
+      </Modal>
+
+      <Modal
+        open={addingIncome}
+        onClose={() => setAddingIncome(false)}
+        title="Add extra income"
+        subtitle="Money in that isn't a sale"
+      >
+        <AddIncomeForm onDone={() => { setAddingIncome(false); resync(); }} />
       </Modal>
     </div>
   );

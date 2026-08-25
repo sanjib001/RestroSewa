@@ -85,6 +85,15 @@ export type DailySummaryModel = {
   extraExpensesTotal: number;
   extraExpensesByCategory: ExpenseCategoryTotal[];
 
+  // Money in that isn't a sale — never folded into salesTotal. No category
+  // taxonomy (unlike extra expenses): each entry prints as its own line, keyed
+  // by its free-text description.
+  incomeCash: number;
+  incomeOnline: number;
+  incomeCard: number;
+  incomeTotal: number;
+  incomeEntries: { description: string; amount: number }[];
+
   vendorPayments: number;          // paid against vendor credit
   customerCreditCollected: number; // repayments received
   customerCreditDiscounted: number; // debt written off as discount
@@ -143,7 +152,7 @@ export async function buildDailySummary(
   const toIso = to.toISOString();
   const service = createServiceClient();
 
-  const [financeRes, paymentsRes, ordersRes, stockRes, productsRes, restRes] = await Promise.all([
+  const [financeRes, paymentsRes, ordersRes, stockRes, productsRes, restRes, incomeRes] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any).rpc("finance_report", {
       p_restaurant_id: restaurantId,
@@ -185,6 +194,17 @@ export async function buildDailySummary(
     // with the screen — which is a support call.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any).from("restaurants").select("type").eq("id", restaurantId).maybeSingle(),
+    // Per-entry list for the PDF. finance_report carries only the totals — this
+    // table has no category to group by (unlike extra_expenses' by-category
+    // jsonb), so each entry is its own PDF line, keyed by its own description.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("extra_income")
+      .select("description, amount")
+      .eq("restaurant_id", restaurantId)
+      .gte("created_at", fromIso)
+      .lt("created_at", toIso)
+      .order("created_at"),
   ]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -225,6 +245,7 @@ export async function buildDailySummary(
   const purchasesTotal = num(f?.purchases_total);
   const salaryPaid = num(f?.salary_total);
   const extraExpensesTotal = num(f?.extra_expenses_total);
+  const incomeTotal = num(f?.income_total);
   const closingCash = num(f?.closing_cash);
   const closingOnline = num(f?.closing_online);
 
@@ -277,6 +298,16 @@ export async function buildDailySummary(
       total: num(c.total),
     })),
 
+    incomeCash: num(f?.income_cash),
+    incomeOnline: num(f?.income_online),
+    incomeCard: num(f?.income_card),
+    incomeTotal,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    incomeEntries: ((incomeRes.data ?? []) as any[]).map((r) => ({
+      description: String(r.description),
+      amount: num(r.amount),
+    })),
+
     vendorPayments: num(f?.vendor_credit_paid),
     customerCreditCollected: num(f?.customer_credit_collected),
     customerCreditDiscounted: num(f?.customer_credit_discounted),
@@ -305,8 +336,11 @@ export async function buildDailySummary(
 
     // Estimated, not booked: bought-stock cost is used, not stock consumed, so a
     // heavy-stocking day reads low and a run-down day reads high. Labelled as an
-    // estimate in the email for exactly that reason.
-    estimatedProfit: salesTotal - purchasesTotal - salaryPaid - extraExpensesTotal,
+    // estimate in the email for exactly that reason. `+ incomeTotal`: real money
+    // that isn't a sale still belongs in the bottom line, exactly as an extra
+    // expense already counts against it — omitting it would understate a day
+    // that included a genuine receipt.
+    estimatedProfit: salesTotal + incomeTotal - purchasesTotal - salaryPaid - extraExpensesTotal,
 
     totalBills,
     totalOrders,

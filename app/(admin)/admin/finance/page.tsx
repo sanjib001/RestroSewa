@@ -7,6 +7,7 @@ import {
   getOpeningBalance,
   getPeriodPurchases,
 } from "@/app/actions/finance";
+import { listExtraIncome } from "@/app/actions/income";
 import { getPayrollSummary } from "@/app/actions/payroll";
 import { getRestaurantConfig } from "@/lib/restaurant-info";
 import { hasRooms } from "@/lib/business-type";
@@ -22,7 +23,7 @@ export default async function FinancePage() {
     redirect("/employee/dashboard");
   }
 
-  const [report, opening, purchases, payroll, ledger, config] = await Promise.all([
+  const [report, opening, purchases, payroll, ledger, config, income] = await Promise.all([
     getFinanceReport({ period: "today" }),
     getOpeningBalance(),
     getPeriodPurchases({ period: "today" }),
@@ -33,6 +34,9 @@ export default async function FinancePage() {
     // Cached — the same config every other screen reads. Only the business type is
     // wanted here, to decide whether the hotel side of the sheet exists at all.
     getRestaurantConfig(restaurantUser.restaurant_id),
+    // SAME period as the report above, or the two would show different windows
+    // on first paint until the client re-fetches.
+    listExtraIncome({ period: "today" }),
   ]);
 
   return (
@@ -42,6 +46,7 @@ export default async function FinancePage() {
       initialPurchases={purchases}
       initialPayroll={payroll}
       initialLedger={ledger}
+      initialIncome={income}
       // Seeding the opening balance re-bases every balance, so it needs write access.
       canManage={STOCK_ACCESS.canManageStock(restaurantUser)}
       // A restaurant-only client has no rooms, so the Room sales and Room advances

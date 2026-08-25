@@ -158,6 +158,19 @@ export type FinanceReport = {
    */
   extraExpensesByCategory: ExpenseCategoryTotal[];
 
+  /**
+   * Money in that isn't a sale — misc/service/other income recorded by hand.
+   * NEVER folds into `salesTotal`: it never touches `payments`, so nothing here
+   * can double-count. Card is its own leg (unlike extra expenses, which never
+   * offered it); the balance formulas fold it into "online" like every other
+   * balance in this app, but it is reported separately so the split the form
+   * captured isn't lost.
+   */
+  incomeCash: number;
+  incomeOnline: number;
+  incomeCard: number;
+  incomeTotal: number;
+
   customerCreditCreated: number;
   customerCreditCollected: number;
   /** Debt forgiven / written off as discount when clearing customer credit. */
@@ -226,6 +239,7 @@ export type FinanceTxKind =
   | "credit_repayment"
   | "purchase"
   | "extra_expense"
+  | "extra_income"
   | "vendor_payment"
   | "salary"
   | "salary_advance"
@@ -242,6 +256,9 @@ export const TX_LABEL: Record<FinanceTxKind, string> = {
   // An overhead. `party` carries the category ("Electricity") where a purchase
   // carries the vendor's name.
   extra_expense: "Extra Expense",
+  // Money in, NOT a sale. `party` carries the free-text description where an
+  // extra expense carries its category — this table has no category at all.
+  extra_income: "Extra Income",
   vendor_payment: "Vendor Credit Repayment",
   salary: "Salary Payment",
   salary_advance: "Salary Advance",

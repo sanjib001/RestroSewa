@@ -103,6 +103,22 @@ export async function renderDailySummaryPdf(
     pdf.row("Advance held at close", money(m.advancesHeld), { strong: true });
   }
 
+  // Money in that isn't a sale — its own section, never a Sales line, so it can
+  // never be mistaken for what the business actually sold. Omitted entirely on a
+  // day with none, same two-part gate the other optional sections use.
+  if (m.incomeTotal > 0) {
+    pdf.sectionTitle("Extra Income");
+    pdf.row("Cash", money(m.incomeCash));
+    pdf.row("Online", money(m.incomeOnline));
+    pdf.row("Card", money(m.incomeCard));
+    pdf.row("Total Extra Income", money(m.incomeTotal), { strong: true });
+    // Same rhythm as extra expenses' by-category breakdown: printed AFTER the
+    // total, one line per entry, keyed by whatever the admin typed as the reason.
+    for (const e of m.incomeEntries) {
+      pdf.row(`  - ${e.description}`, money(e.amount));
+    }
+  }
+
   pdf.sectionTitle("Purchases & Expenses");
   pdf.row("Purchases - cash", money(m.purchasesCash));
   pdf.row("Purchases - online", money(m.purchasesOnline));
@@ -142,7 +158,11 @@ export async function renderDailySummaryPdf(
   pdf.row("Net balance (cash + bank)", money(m.closingNet), { strong: true });
 
   pdf.sectionTitle("Estimated Profit");
-  pdf.row("Sales - purchases - salaries - expenses", money(m.estimatedProfit), { strong: true });
+  pdf.row(
+    "Sales + extra income - purchases - salaries - expenses",
+    money(m.estimatedProfit),
+    { strong: true }
+  );
 
   pdf.sectionTitle("Operations");
   pdf.row("Total bills", String(m.totalBills));
