@@ -2180,8 +2180,10 @@ export async function getSalesReport(params?: {
       .from("payments")
       // table_id / room_id (+ room_stays.room_id for a room folio) come along so the
       // report can be scoped to the viewer's assigned tables/rooms — see the filter below.
+      // sessions.room_stay_id rides along too, so a room bill settled by a deposit can
+      // look up how that deposit was tendered — see advanceStayCash below.
       .select(
-        "id, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, payment_method, created_at, sessions ( type, table_id, room_id, customer_name, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), room_stays ( room_id ), credits ( id, credit_number, customer_name, down_payment )"
+        "id, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, advance_amount, payment_method, created_at, sessions ( type, table_id, room_id, customer_name, room_stay_id, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), room_stays ( room_id ), credits ( id, credit_number, customer_name, down_payment )"
       )
       .eq("restaurant_id", ru.restaurant_id)
       .order("created_at", { ascending: false }),
@@ -2245,6 +2247,34 @@ export async function getSalesReport(params?: {
 
   const { fromMs, toMs } = resolveSalesRange(period, ru.closingHour, params?.from, params?.to);
 
+  // Which stays this call actually needs a deposit split for: only bills landing in
+  // the selected period that were settled (in full or in part) by an advance taken
+  // earlier — a plain cash/online/card bill never touches room_advances at all.
+  const neededStayIds = new Set<string>();
+  for (const p of rows) {
+    const ts = new Date(p.created_at).getTime();
+    if (ts < fromMs || ts >= toMs) continue;
+    if (Number(p.advance_amount ?? 0) <= 0.005) continue;
+    const stayId = oneEmbed(p.sessions)?.room_stay_id as string | null;
+    if (stayId) neededStayIds.add(stayId);
+  }
+
+  // Net cash actually retained per stay — a refund is a negative room_advances row,
+  // so summing cash_amount across ALL of a stay's rows nets it off automatically.
+  // Mirrors `finance_report`'s `advsold` CTE; keep the two identical, or Sales and
+  // Finance disagree about how the same deposit was tendered.
+  const stayCash = new Map<string, number>();
+  if (neededStayIds.size > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: advRows } = await (service as any)
+      .from("room_advances")
+      .select("stay_id, cash_amount")
+      .in("stay_id", Array.from(neededStayIds));
+    for (const a of (advRows ?? []) as { stay_id: string; cash_amount: number }[]) {
+      stayCash.set(a.stay_id, (stayCash.get(a.stay_id) ?? 0) + Number(a.cash_amount ?? 0));
+    }
+  }
+
   const overview = { today: 0, week: 0, month: 0, year: 0, total: 0 };
   const breakdown = { cash: 0, online: 0, card: 0, credit: 0, other: 0 };
   let periodTotal = 0;
@@ -2285,9 +2315,23 @@ export async function getSalesReport(params?: {
       breakdown.online += online;
       breakdown.card += card;
 
+      // A room bill settled (in full or in part) by a deposit taken earlier never
+      // shows that money here as cash/online/card — checkout only tenders what's
+      // left AFTER the deposit. Without this, a fully-prepaid room's whole value
+      // still lands in periodTotal but vanishes from every breakdown tile.
+      const advanceApplied = Number(p.advance_amount ?? 0);
+      if (advanceApplied > 0.005) {
+        const stayId = oneEmbed(p.sessions)?.room_stay_id as string | null;
+        const heldCash = stayId ? stayCash.get(stayId) ?? 0 : 0;
+        const advCash = Math.min(Math.max(heldCash, 0), advanceApplied);
+        breakdown.cash += advCash;
+        breakdown.online += advanceApplied - advCash;
+      }
+
       if (p.payment_method === "credit") {
-        // The gap between the bill and what was tendered went on credit.
-        breakdown.credit += Math.max(0, value - (cash + online + card));
+        // The gap between the bill and what was tendered OR already settled by a
+        // deposit is the only part actually left on credit.
+        breakdown.credit += Math.max(0, value - (cash + online + card + advanceApplied));
       } else if (p.payment_method === "card" && card === 0) {
         // Legacy card rows, written before card_amount existed, carry the whole
         // value under amount only.

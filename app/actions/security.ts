@@ -2,7 +2,7 @@
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
-import { requireRestaurantAdmin, requireRestaurantStaff } from "@/lib/auth/guards";
+import { requireAdminOrPermission, requireRestaurantAdmin, requireRestaurantStaff } from "@/lib/auth/guards";
 import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 import { revalidateRestaurantInfo } from "@/lib/restaurant-info";
 import {
@@ -105,7 +105,18 @@ function friendlyEditError(raw: string | undefined): string {
 }
 
 export type PaymentTender = {
+  /** The bill's full value, for display only — a discount-room stay etc. */
   total: number;
+  /** Already settled by a room advance taken earlier. Not editable here — see `editable`. */
+  advance: number;
+  /**
+   * What the cash/online/card split must add up to. Equals `total − advance`,
+   * exactly what `edit_payment_tender` itself validates against — a bill part- or
+   * fully-settled by a deposit can only have the REMAINDER re-split; redistributing
+   * the advance too would count that deposit twice. Keep this identical to the
+   * RPC's `v_total`, or the dialog accepts a split the server then rejects.
+   */
+  editable: number;
   cash: number;
   online: number;
   card: number;
@@ -125,14 +136,18 @@ export async function getPaymentTender(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (service as any)
     .from("payments")
-    .select("amount, total_amount, cash_amount, online_amount, card_amount, payment_method")
+    .select("amount, total_amount, cash_amount, online_amount, card_amount, advance_amount, payment_method")
     .eq("id", paymentId)
     .eq("restaurant_id", restaurantUser.restaurant_id)
     .maybeSingle();
 
   if (!data) return { error: "That payment no longer exists." };
+  const total = Number(data.total_amount ?? data.amount ?? 0);
+  const advance = Number(data.advance_amount ?? 0);
   return {
-    total: Number(data.total_amount ?? data.amount ?? 0),
+    total,
+    advance,
+    editable: Math.max(0, total - advance),
     cash: Number(data.cash_amount ?? 0),
     online: Number(data.online_amount ?? 0),
     card: Number(data.card_amount ?? 0),
@@ -195,8 +210,9 @@ export async function updatePaymentTender(
 // Correcting a deposit is a heavier act than re-splitting a tender. A tender edit only
 // moves money between columns on a bill that already balances; an advance edit rewrites
 // a figure that has ALREADY been counted into a day's cash-in-hand, with no bill to
-// reconcile it against. Hence admin-only AND the Security PIN, and only while the stay
-// is still open — once it is settled the advance is frozen inside a closed bill.
+// reconcile it against. Hence the SAME gate `edit_payment_tender` uses — Process
+// Payments (the admin passes automatically) AND the Security PIN — and only while the
+// stay is still open; once it is settled the advance is frozen inside a closed bill.
 
 function friendlyAdvanceError(code: string): string {
   if (code.includes("ADVANCE_STAY_CLOSED")) {
@@ -212,7 +228,7 @@ export async function updateRoomAdvance(
   advanceId: string,
   split: { amount: number; cash: number; online: number; card: number; method: string }
 ): Promise<ActionResult> {
-  const { restaurantUser } = await requireRestaurantAdmin();
+  const { restaurantUser } = await requireAdminOrPermission(PERMISSIONS.PROCESS_PAYMENTS);
 
   const authorized = await verifySecurityPin(restaurantUser, "edit_room_advance", pin, {
     type: "room_advance",
@@ -221,6 +237,16 @@ export async function updateRoomAdvance(
   if (!authorized) return { error: "Incorrect Security PIN." };
 
   const service = createServiceClient();
+  // Needed only to revalidate the one page the RPC's own revalidatePath list can't
+  // name — that page is keyed by stay_id, which the caller never passes in.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: advanceRow } = await (service as any)
+    .from("room_advances")
+    .select("stay_id")
+    .eq("id", advanceId)
+    .eq("restaurant_id", restaurantUser.restaurant_id)
+    .maybeSingle();
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any).rpc("edit_room_advance", {
     p_restaurant_id: restaurantUser.restaurant_id,
@@ -251,11 +277,15 @@ export async function updateRoomAdvance(
   for (const p of ["/admin/finance", "/admin/dashboard", "/employee/dashboard"]) {
     revalidatePath(p);
   }
+  // Without this the cashier's own folio view for this stay keeps the pre-edit
+  // split/method cached — Finance re-queries fresh and looks right, so a
+  // corrected advance can silently disagree with what the front desk sees.
+  if (advanceRow?.stay_id) revalidatePath(`/employee/room/${advanceRow.stay_id}`);
   return { ok: true };
 }
 
 export async function removeRoomAdvance(pin: string, advanceId: string): Promise<ActionResult> {
-  const { restaurantUser } = await requireRestaurantAdmin();
+  const { restaurantUser } = await requireAdminOrPermission(PERMISSIONS.PROCESS_PAYMENTS);
 
   const authorized = await verifySecurityPin(restaurantUser, "edit_room_advance", pin, {
     type: "room_advance",
@@ -264,6 +294,14 @@ export async function removeRoomAdvance(pin: string, advanceId: string): Promise
   if (!authorized) return { error: "Incorrect Security PIN." };
 
   const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: advanceRow } = await (service as any)
+    .from("room_advances")
+    .select("stay_id")
+    .eq("id", advanceId)
+    .eq("restaurant_id", restaurantUser.restaurant_id)
+    .maybeSingle();
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { error } = await (service as any).rpc("delete_room_advance", {
     p_restaurant_id: restaurantUser.restaurant_id,
@@ -288,6 +326,7 @@ export async function removeRoomAdvance(pin: string, advanceId: string): Promise
   for (const p of ["/admin/finance", "/admin/dashboard", "/employee/dashboard"]) {
     revalidatePath(p);
   }
+  if (advanceRow?.stay_id) revalidatePath(`/employee/room/${advanceRow.stay_id}`);
   return { ok: true };
 }
 

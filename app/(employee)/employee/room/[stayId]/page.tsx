@@ -109,8 +109,9 @@ export default async function RoomPage({
       canCheckIn={ROOM_ACCESS.canCheckIn(restaurantUser)}
       canCancelStay={ROOM_ACCESS.canCancelStay(restaurantUser)}
       // CORRECTING one is a different act — it rewrites money already counted into a
-      // day's cash. Owner-only, and the server also demands the Security PIN.
-      canEditAdvance={restaurantUser.role === "restaurant_admin"}
+      // day's cash. Same gate as the Sales page's tender edit (Process Payments; the
+      // admin passes automatically), and the server also demands the Security PIN.
+      canEditAdvance={hasPermission(restaurantUser, PERMISSIONS.PROCESS_PAYMENTS)}
     />
     </>
   );
