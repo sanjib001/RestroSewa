@@ -477,6 +477,8 @@ export function BillTicket({
   grandTotalOverride,
   advancePaid = 0,
   balanceDue,
+  advanceCash = 0,
+  advanceOnline = 0,
 }: {
   restaurant: RestaurantInfo;
   billNo: string;
@@ -517,6 +519,14 @@ export function BillTicket({
    */
   advancePaid?: number;
   balanceDue?: number;
+  /**
+   * How the deposit above was itself tendered. Printed as its own split line
+   * whenever there's anything to show — unlike the checkout tender's split
+   * (which stays silent for a single method, since the "Payment" line already
+   * names it), the advance has no other line naming its method at all.
+   */
+  advanceCash?: number;
+  advanceOnline?: number;
 }) {
   const hasCustomer = !!(
     customer &&
@@ -551,6 +561,15 @@ export function BillTicket({
     : [];
   const tenderSplit =
     parts.length > 1 ? parts.map((p) => `${p.label} ${rupee(p.v)}`).join(" · ") : null;
+
+  // Unlike the checkout tender above, nothing else on this receipt names how the
+  // advance arrived — so this prints even for a single method, not just a mix.
+  const advanceParts = [
+    { label: "Cash", v: advanceCash },
+    { label: "Online", v: advanceOnline },
+  ].filter((p) => p.v > 0);
+  const advanceSplit =
+    advanceParts.length > 0 ? advanceParts.map((p) => `${p.label} ${rupee(p.v)}`).join(" · ") : null;
 
   return (
     <>
@@ -671,6 +690,7 @@ export function BillTicket({
       {advancePaid > 0 && (
         <>
           <Line label="Advance received" value={`- ${rupee(advancePaid)}`} />
+          {advanceSplit && <div style={{ fontSize: 11, textAlign: "right" }}>{advanceSplit}</div>}
           <div style={{ borderTop: "1px solid #000", margin: "6px 0" }} />
           <Line
             label="BALANCE PAYABLE"

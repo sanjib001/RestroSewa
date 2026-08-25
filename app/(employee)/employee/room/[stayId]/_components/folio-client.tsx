@@ -1155,9 +1155,17 @@ export function FolioClient({
   const f = view.folio;
   const open = view.status === "active";
 
+  // How the deposit itself was tendered — net of any refund, same reduce the
+  // checkout form's own refund panel uses for `heldCash`/`heldOnline`. Without
+  // this the bill's "Advance received" line names an amount but not a method, so
+  // a mis-tendered deposit (cash typed for an online transfer) reads identically
+  // to a correct one until someone opens the advance list itself.
+  const advanceCash = view.advances.reduce((s, a) => s + a.cash, 0);
+  const advanceOnline = view.advances.reduce((s, a) => s + a.online + a.card, 0);
+
   // The bill, arranged for the SHARED renderer. Same mapper the paid bill in Sales uses,
   // so the document a guest is shown before paying and the one filed after are one thing.
-  const bill = folioToBill({ folio: f, roomType: view.type_name });
+  const bill = folioToBill({ folio: f, roomType: view.type_name, advanceCash, advanceOnline });
 
   // Once the guest has checked out the SAME document is a receipt, not a bill: it has to
   // say PAID (or what is still owed), how it was tendered and who took the money. It used
@@ -1432,7 +1440,17 @@ export function FolioClient({
               rather than reducing it — the sale recorded at checkout is the whole stay. */}
           {f.advancePaid > 0 && (
             <>
-              <Line label="Advance received" amount={-f.advancePaid} muted />
+              <Line
+                label="Advance received"
+                detail={[
+                  advanceCash > 0 ? `Cash ${rupee(advanceCash)}` : null,
+                  advanceOnline > 0 ? `Online ${rupee(advanceOnline)}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || undefined}
+                amount={-f.advancePaid}
+                muted
+              />
               <div
                 className="flex items-baseline justify-between px-4 py-3 border-t"
                 style={{ borderColor: "var(--color-hairline)" }}
@@ -1633,6 +1651,8 @@ export function FolioClient({
           // exactly as they did before — and a table bill never passes these at all.
           advancePaid={bill.advancePaid}
           balanceDue={bill.balanceDue}
+          advanceCash={bill.advanceCash}
+          advanceOnline={bill.advanceOnline}
           payment={
             paid
               ? {

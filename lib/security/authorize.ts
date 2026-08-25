@@ -31,6 +31,10 @@ export type SecurityOperation =
   // till reconciliation with nothing left to explain it.
   | "edit_extra_expense"
   | "delete_extra_expense"
+  // Correcting or removing an extra-income entry. The mirror of the extra-expense
+  // pair above, on the money-IN side — same reasoning, same admin-only gate.
+  | "edit_extra_income"
+  | "delete_extra_income"
   // Ending a stay without billing it, and keeping part (or none) of the deposit.
   // The only PIN operation that is NOT admin-only — a permitted staff member may
   // do it too — which is precisely why the PIN matters here: the permission says

@@ -45,9 +45,24 @@ export type RoomBillView = {
   advancePaid: number;
   /** What is handed over at checkout: grandTotal − advancePaid. */
   balanceDue: number;
+  /**
+   * How the deposit itself was tendered — the part of `advancePaid` that arrived as
+   * cash vs online (card rides with online, same as every other balance in this app).
+   * Without this a bill settled by an advance shows "Advance received ₹1,000" with no
+   * way to tell it apart from the tender printed on the PAID line, which only ever
+   * covers what was collected AT checkout.
+   */
+  advanceCash: number;
+  advanceOnline: number;
 };
 
-export type RoomBillInput = { folio: RoomFolio; roomType: string };
+export type RoomBillInput = {
+  folio: RoomFolio;
+  roomType: string;
+  /** Defaults to 0 — a table bill and most room bills never pass these. */
+  advanceCash?: number;
+  advanceOnline?: number;
+};
 
 /**
  * A folio line is already "one thing, at one amount" — the room charge is 2 nights folded
@@ -64,7 +79,7 @@ function toLine(l: FolioLine): BillSectionLine {
   };
 }
 
-export function folioToBill({ folio, roomType }: RoomBillInput): RoomBillView {
+export function folioToBill({ folio, roomType, advanceCash = 0, advanceOnline = 0 }: RoomBillInput): RoomBillView {
   // An empty section prints as a heading with nothing under it, which reads like a mistake
   // on paper — so a stay with no extras simply has no Extras heading.
   const sections: BillSection[] = [{ title: "Room charge", lines: [toLine(folio.room)] }];
@@ -90,5 +105,7 @@ export function folioToBill({ folio, roomType }: RoomBillInput): RoomBillView {
     grandTotal: folio.grandTotal,
     advancePaid: folio.advancePaid,
     balanceDue: folio.balanceDue,
+    advanceCash,
+    advanceOnline,
   };
 }

@@ -624,3 +624,166 @@ export async function removeExtraExpense(pin: string, expenseId: string): Promis
   }
   return { ok: true };
 }
+
+// ─── Extra income ─────────────────────────────────────────────────────────────
+// The mirror of the extra-expense edits above, on the money-IN side: the row has
+// ALREADY been counted into a day's cash-in-hand, and there is nothing else to
+// reconcile it against — no bill, no vendor statement. Admin-only AND the
+// Security PIN, exactly like `updateExtraExpense`/`removeExtraExpense`. The
+// figures corrected here move `finance_report`'s `income_*` legs and the
+// `finance_transactions` ledger the moment they change, because both are
+// derived live from this table — nothing to re-sync.
+
+/** Loads the row and proves it belongs to this restaurant before touching it. */
+async function ownedIncome(restaurantId: string, incomeId: string) {
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (service as any)
+    .from("extra_income")
+    .select("id, description, amount, payment_method, cash_amount, online_amount, card_amount")
+    .eq("id", incomeId)
+    .eq("restaurant_id", restaurantId)
+    .maybeSingle();
+  return data ?? null;
+}
+
+export async function updateExtraIncome(
+  pin: string,
+  incomeId: string,
+  next: {
+    description: string;
+    amount: number;
+    method: string;
+    cash: number;
+    online: number;
+    card: number;
+  }
+): Promise<ActionResult> {
+  const { restaurantUser } = await requireRestaurantAdmin();
+
+  const authorized = await verifySecurityPin(restaurantUser, "edit_extra_income", pin, {
+    type: "extra_income",
+    id: incomeId,
+  });
+  if (!authorized) return { error: "Incorrect Security PIN." };
+
+  const before = await ownedIncome(restaurantUser.restaurant_id, incomeId);
+  if (!before) return { error: "That income entry no longer exists." };
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("extra_income")
+    .update({
+      description: next.description,
+      amount: next.amount,
+      payment_method: next.method,
+      cash_amount: next.cash,
+      online_amount: next.online,
+      card_amount: next.card,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", incomeId)
+    .eq("restaurant_id", restaurantUser.restaurant_id);
+
+  if (error) {
+    await logSecurityEvent({
+      restaurantId: restaurantUser.restaurant_id,
+      actor: restaurantUser,
+      operation: "edit_extra_income",
+      targetType: "extra_income",
+      targetId: incomeId,
+      outcome: "blocked",
+      detail: { code: error.message },
+    });
+    return {
+      error: (error.message ?? "").includes("extra_income_split_check")
+        ? "Cash, online and card together must equal the amount."
+        : "Could not update the income entry.",
+    };
+  }
+
+  // The BEFORE figures are the point of this record: the row itself now holds
+  // only the corrected values, so without them the log would say an edit
+  // happened but not what it changed.
+  await logSecurityEvent({
+    restaurantId: restaurantUser.restaurant_id,
+    actor: restaurantUser,
+    operation: "edit_extra_income",
+    targetType: "extra_income",
+    targetId: incomeId,
+    outcome: "success",
+    detail: {
+      before: {
+        description: before.description,
+        amount: Number(before.amount),
+        method: before.payment_method,
+        cash: Number(before.cash_amount),
+        online: Number(before.online_amount),
+        card: Number(before.card_amount),
+      },
+      after: next,
+    },
+  });
+
+  revalidatePath("/admin/finance");
+  return { ok: true };
+}
+
+export async function removeExtraIncome(pin: string, incomeId: string): Promise<ActionResult> {
+  const { restaurantUser } = await requireRestaurantAdmin();
+
+  const authorized = await verifySecurityPin(restaurantUser, "delete_extra_income", pin, {
+    type: "extra_income",
+    id: incomeId,
+  });
+  if (!authorized) return { error: "Incorrect Security PIN." };
+
+  const before = await ownedIncome(restaurantUser.restaurant_id, incomeId);
+  if (!before) return { error: "That income entry no longer exists." };
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("extra_income")
+    .delete()
+    .eq("id", incomeId)
+    .eq("restaurant_id", restaurantUser.restaurant_id);
+
+  if (error) {
+    await logSecurityEvent({
+      restaurantId: restaurantUser.restaurant_id,
+      actor: restaurantUser,
+      operation: "delete_extra_income",
+      targetType: "extra_income",
+      targetId: incomeId,
+      outcome: "blocked",
+      detail: { code: error.message },
+    });
+    return { error: "Could not delete the income entry." };
+  }
+
+  // A deletion leaves nothing behind, so the audit row IS the only remaining
+  // record that this money was ever recorded.
+  await logSecurityEvent({
+    restaurantId: restaurantUser.restaurant_id,
+    actor: restaurantUser,
+    operation: "delete_extra_income",
+    targetType: "extra_income",
+    targetId: incomeId,
+    outcome: "success",
+    detail: {
+      deleted: {
+        description: before.description,
+        amount: Number(before.amount),
+        method: before.payment_method,
+        cash: Number(before.cash_amount),
+        online: Number(before.online_amount),
+        card: Number(before.card_amount),
+      },
+    },
+  });
+
+  revalidatePath("/admin/finance");
+  return { ok: true };
+}

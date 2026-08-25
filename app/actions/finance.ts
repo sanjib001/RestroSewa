@@ -60,6 +60,10 @@ const EMPTY = (period: FinancePeriod, from: string, to: string): FinanceReport =
   extraExpensesOnline: 0,
   extraExpensesTotal: 0,
   extraExpensesByCategory: [],
+  incomeCash: 0,
+  incomeOnline: 0,
+  incomeCard: 0,
+  incomeTotal: 0,
   customerCreditCreated: 0,
   customerCreditCollected: 0,
   customerCreditDiscounted: 0,
@@ -177,6 +181,11 @@ export async function getFinanceReport(params?: {
       online: num(c.online),
       total: num(c.total),
     })),
+
+    incomeCash: num(row.income_cash),
+    incomeOnline: num(row.income_online),
+    incomeCard: num(row.income_card),
+    incomeTotal: num(row.income_total),
 
     customerCreditCreated: num(row.customer_credit_created),
     customerCreditCollected: num(row.customer_credit_collected),
@@ -510,6 +519,14 @@ export async function exportFinanceCsv(params?: {
           ]),
         ]
       : []),
+    [],
+    // Money in that is NOT a sale. Never added to TOTAL SALES above — this table
+    // never touches `payments`, so there is nothing here to double-count.
+    ["EXTRA INCOME"],
+    ["Cash", fmt(report.incomeCash)],
+    ["Online", fmt(report.incomeOnline)],
+    ["Card", fmt(report.incomeCard)],
+    ["Total Extra Income", fmt(report.incomeTotal)],
     [],
     // Each supplier bill behind that total — who, when, how much, how settled.
     ...(purchases.length > 0
