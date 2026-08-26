@@ -23,11 +23,24 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: restaurant } = await (service as any)
+  const { data: restaurant, error } = await (service as any)
     .from("restaurants")
     .select("name, logo_url, install_date, subscription_extra_days")
     .eq("id", restaurantUser.restaurant_id)
     .single();
+
+  // Every downstream default in this layout (name, logo, the watermark)
+  // silently swallowed a failed query as "restaurant just has no name/logo
+  // set" — exactly how a migration lagging behind this layout's own code
+  // (querying columns the database doesn't have yet) presented as a missing
+  // logo and a missing watermark with nothing in any log to explain it.
+  // Throw instead, same as `getAllRestaurants`.
+  if (error) {
+    throw new Error(
+      `EmployeeLayout: restaurant lookup failed for ${restaurantUser.restaurant_id} — ` +
+        `${error.code ?? "?"} ${error.message ?? error}`
+    );
+  }
 
   // Single unread badge on the (now minimal) top bar — every new alert the staff
   // member is permitted to see. Sections themselves live on the dashboard.

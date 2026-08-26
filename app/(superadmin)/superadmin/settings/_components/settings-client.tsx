@@ -215,6 +215,7 @@ export function SettingsClient({ restaurants }: { restaurants: RestaurantRow[] }
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, startLoad] = useTransition();
   const [statusPending, startStatus] = useTransition();
+  const [statusError, setStatusError] = useState<string | null>(null);
   // A deleted restaurant has to leave the picker immediately. Waiting for the
   // server to revalidate would leave a name in the list that resolves to nothing.
   const [deleted, setDeleted] = useState<string[]>([]);
@@ -258,8 +259,16 @@ export function SettingsClient({ restaurants }: { restaurants: RestaurantRow[] }
   function toggleActive() {
     if (!detail) return;
     const makeActive = !detail.restaurant.is_active;
+    setStatusError(null);
     startStatus(async () => {
-      await toggleRestaurantStatus(detail.restaurant.id, makeActive);
+      const res = await toggleRestaurantStatus(detail.restaurant.id, makeActive);
+      // Only apply the flip locally once the write actually succeeded — see
+      // `toggleRestaurantStatus`'s own comment on why this used to update
+      // unconditionally.
+      if (res && "error" in res) {
+        setStatusError(res.error);
+        return;
+      }
       setDetail((prev) =>
         prev ? { ...prev, restaurant: { ...prev.restaurant, is_active: makeActive } } : prev
       );
@@ -394,6 +403,9 @@ export function SettingsClient({ restaurants }: { restaurants: RestaurantRow[] }
                 {statusPending ? "Saving…" : detail.restaurant.is_active ? "Deactivate" : "Activate"}
               </button>
             </div>
+            {statusError && (
+              <p className="text-xs mt-1.5" style={{ color: "var(--color-ruby)" }}>{statusError}</p>
+            )}
           </div>
 
           {/* Subscription */}
