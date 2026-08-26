@@ -157,7 +157,7 @@ There are three, and they are NOT interchangeable — pick deliberately and say 
 
 | Target | How to reach it |
 |---|---|
-| DEV (`ojqomyunjmaivsyvnvbv`) | `.env.local` |
+| DEV (`lnhionnsqbcfiigbsokg`) | `.env.local` |
 | Hosted PRODUCTION (`qsccnzgrhrnjggyymefr`) | `.env.production` — **live customers** |
 | Self-hosted DO droplet | `.env.hrestrosewa`, via Kong `POST {url}/pg/query` |
 

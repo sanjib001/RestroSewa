@@ -34,7 +34,7 @@ permissions — all realtime, installable as a PWA. Must "feel instantaneous".
 ## Tech stack
 - **Next.js** (App Router; Server Components + Server Actions) 16.x, **React** 19.x, **TypeScript**.
 - **Supabase**: Postgres (RLS + `service_role`), Auth, Storage. Two projects: **dev**
-  (`ojqomyunjmaivsyvnvbv`) and **prod** (`qsccnzgrhrnjggyymefr`).
+  (`lnhionnsqbcfiigbsokg`) and **prod** (`qsccnzgrhrnjggyymefr`).
 - **Tailwind CSS v4**, `radix-ui`, `lucide-react`.
 - **web-push** (VAPID) for notifications; **SSE** for realtime; **nodemailer** (Gmail SMTP) +
   **pdf-lib** for the daily report; `qrcode.react`; `pg` for the migration runner.

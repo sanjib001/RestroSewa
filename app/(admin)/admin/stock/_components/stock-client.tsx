@@ -522,8 +522,8 @@ function ProductLinks({
   }, [pending, state, onChanged]);
 
   // Don't offer a target that already consumes this product. Keyed by item AND
-  // variant, so "Momo" and "Momo · Chicken" are offered independently — the whole
-  // point is that they can consume different things.
+  // variant, so "Momo · Chicken" and "Momo · Veg" are offered independently — the
+  // whole point is that they can consume different things.
   const linked = new Set(
     links.map((l) => (l.variant_id ? `${l.menu_item_id}::${l.variant_id}` : l.menu_item_id))
   );
