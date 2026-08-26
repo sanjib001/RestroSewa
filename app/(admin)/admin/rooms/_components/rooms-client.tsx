@@ -515,9 +515,9 @@ function RoomTypeSection({
         </form>
       ) : (
         <div className="flex items-start justify-between mb-4">
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <p className="font-medium text-sm" style={{ color: "var(--color-ink)" }}>{type.name}</p>
+              <p className="font-medium text-sm truncate" style={{ color: "var(--color-ink)" }}>{type.name}</p>
               <RoomTypeWaiterBar
                 roomTypeId={type.id}
                 employees={employees}

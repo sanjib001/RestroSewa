@@ -113,7 +113,11 @@ function Section({
           style={{ borderTop: i === 0 || r.sub ? "none" : "1px solid var(--color-hairline)" }}
         >
           <span
-            className={r.sub ? "text-xs pl-4" : "text-sm"}
+            // min-w-0 is load-bearing: a flex child holding text defaults to
+            // min-width:auto, so on a narrow phone a long hint (e.g. "Paid by
+            // advance — cash") pushes the row wider than the card instead of
+            // wrapping — silently clipped by the section's own overflow-hidden.
+            className={(r.sub ? "text-xs pl-4" : "text-sm") + " min-w-0"}
             style={{ color: "var(--color-ink-mute)", opacity: r.sub ? 0.8 : 1 }}
           >
             {r.label}
@@ -903,7 +907,7 @@ export function FinanceClient({
             {loading && <span className="ml-2">Updating…</span>}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {canManage && (
             <Button variant="secondary" size="sm" onClick={() => setSettingOpening(true)}>
               <Settings2 size={14} /> Opening balance
