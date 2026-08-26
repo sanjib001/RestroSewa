@@ -40,6 +40,14 @@ edits".
   **held / kept / refunded**: who cancelled, without how much they kept, is not an audit trail.
   Checks run permission → tenancy/assignment → PIN, in that order, so a wrong PIN cannot be used to
   probe which stay ids exist. See `modules/rooms.md`.
+- **Set/change the opening balance** (`set_opening_balance`, 2026-08-26) — same shape as
+  `cancel_room_stay`: gated on the existing `MANAGE_STOCK` + `VIEW_FINANCE` permission rather than
+  `requireRestaurantAdmin`, so a permitted staff member may still attempt it and the PIN says it is
+  really them. Unlike the money-edit ops above there is no RPC-level "before" row to diff against on
+  a first-ever seed, so the audit `detail.before` is `null` there — the UI (`security-activity-client.tsx`)
+  renders that as "not set" rather than skipping the summary. Lives in `app/actions/finance.ts`
+  alongside `getOpeningBalance`, not in `security.ts`, matching where `cancel_room_stay` lives in
+  `rooms.ts`. See `modules/finance.md`.
 
 # Business Rules
 - **PIN-gated always.** The **payment tender** edit (Sales) is open to **billing staff**

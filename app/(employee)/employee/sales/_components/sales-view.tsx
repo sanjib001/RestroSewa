@@ -52,7 +52,7 @@ const PERIOD_LABEL: Record<SalesPeriod, string> = {
   custom: "Custom Range",
 };
 
-// ── Date-bucketing for the transaction list (Today / Yesterday / Month Year) ──
+// ── Date-bucketing for the transaction list (Today / Yesterday / then… what?) ──
 //
 // Every date here arrives already decided by the SERVER: each row carries its
 // own `business_date`, and the report says which business date is "today". This
@@ -60,24 +60,62 @@ const PERIOD_LABEL: Record<SalesPeriod, string> = {
 // and re-derive the day from the browser's clock, so the grouping could disagree
 // with the totals sitting right above it (a device in another timezone, or any
 // restaurant whose business day ends after midnight).
-function bucketLabel(t: SalesTxn, today: string, yesterday: string): string {
+//
+// The bucket GRAIN below "Today"/"Yesterday" scales with how wide the selected
+// period is: a Week or Month view is only useful broken down by DAY (that used to
+// collapse everything past yesterday into one "August 2026" bucket, hiding which
+// day anything happened on); a Year view is only readable broken down by MONTH;
+// All Time / a long custom range is only readable broken down by YEAR. Getting
+// this from the period rather than eyeballing the data keeps it stable — the
+// grain doesn't jump around as bills load in.
+type DateGrain = "day" | "month" | "year";
+
+// A LOCAL day count, not `(msB - msA) / 86400000` — that divides UTC instants,
+// which is wrong the moment either date fell on a DST transition.
+function daysBetween(fromIso: string, toIso: string): number {
+  const [fy, fm, fd] = fromIso.split("-").map(Number);
+  const [ty, tm, td] = toIso.split("-").map(Number);
+  const a = new Date(fy, fm - 1, fd);
+  const b = new Date(ty, tm - 1, td);
+  return Math.round((b.getTime() - a.getTime()) / 86400000);
+}
+
+function grainFor(period: SalesPeriod, from: string | null, to: string | null): DateGrain {
+  if (period === "today" || period === "week" || period === "month") return "day";
+  if (period === "year") return "month";
+  if (period === "all") return "year";
+  // Custom range: no period name to go by, so size it off the actual span.
+  if (from && to) {
+    const span = daysBetween(from, to);
+    if (span <= 31) return "day";
+    if (span <= 366) return "month";
+    return "year";
+  }
+  return "day";
+}
+
+function bucketLabel(t: SalesTxn, today: string, yesterday: string, grain: DateGrain): string {
   if (t.business_date === today) return "Today";
   if (t.business_date === yesterday) return "Yesterday";
-  // Older than that, group by month — parsed as a LOCAL date, since
-  // `new Date("YYYY-MM-DD")` would be read as UTC and could name the wrong month.
+  // Parsed as a LOCAL date, since `new Date("YYYY-MM-DD")` would be read as UTC
+  // and could name the wrong day/month for a west-of-UTC business.
   const [y, m, d] = t.business_date.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  const date = new Date(y, m - 1, d);
+  if (grain === "day") return date.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+  if (grain === "month") return date.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  return String(y);
 }
 
 function groupByDate(
   txns: SalesTxn[],
   today: string,
-  yesterday: string
+  yesterday: string,
+  grain: DateGrain
 ): { label: string; items: SalesTxn[] }[] {
   const groups: { label: string; items: SalesTxn[] }[] = [];
   const index = new Map<string, { label: string; items: SalesTxn[] }>();
   for (const t of txns) {
-    const label = bucketLabel(t, today, yesterday);
+    const label = bucketLabel(t, today, yesterday, grain);
     let g = index.get(label);
     if (!g) {
       g = { label, items: [] };
@@ -283,9 +321,10 @@ export function SalesView({
   );
   useRealtime(["billing", "credits"], resync);
 
+  const grain = useMemo(() => grainFor(report.period, report.from, report.to), [report.period, report.from, report.to]);
   const groups = useMemo(
-    () => groupByDate(report.transactions, report.businessToday, report.businessYesterday),
-    [report.transactions, report.businessToday, report.businessYesterday]
+    () => groupByDate(report.transactions, report.businessToday, report.businessYesterday, grain),
+    [report.transactions, report.businessToday, report.businessYesterday, grain]
   );
 
   // A report cached by the client router from before credits existed has no

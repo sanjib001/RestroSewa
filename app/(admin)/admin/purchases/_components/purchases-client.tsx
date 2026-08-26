@@ -40,6 +40,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PaymentMethodPicker, splitIsValid } from "@/components/ui/payment-method-picker";
 import { SecurityPinDialog } from "@/components/security-pin-dialog";
+import { PeriodFilter } from "@/components/ui/period-filter";
+import type { HistoryPeriod } from "@/lib/history-period";
 import { Modal } from "../../_components/modal";
 import { ChevronLeft, ChevronRight, Loader2, Pencil, Plus, Search, Trash2 } from "lucide-react";
 
@@ -695,6 +697,8 @@ export function PurchasesClient({
   const [summary, setSummary] = useState(initialSummary);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<PurchaseFilter>("all");
+  const [period, setPeriod] = useState<HistoryPeriod>("today");
+  const [date, setDate] = useState("");
   /** Station filter. `all` keeps the familiar list of BILLS; picking a station
    *  switches to LINES, because only a line belongs to one station. */
   const [station, setStation] = useState<string>(ALL_STATIONS);
@@ -703,15 +707,15 @@ export function PurchasesClient({
   const [creating, setCreating] = useState(false);
   const [detailOf, setDetailOf] = useState<PurchaseRow | null>(null);
 
-  const reload = useCallback((s: string, f: PurchaseFilter) => {
+  const reload = useCallback((s: string, f: PurchaseFilter, p: HistoryPeriod, d: string) => {
     startTransition(async () => {
       try {
         // Bills and lines are fetched together, always. They are two views of the
         // same window, so refreshing one without the other would let the station
         // view fall behind the bill view after a purchase is recorded.
         const [list, lineList, sum] = await Promise.all([
-          getPurchases({ search: s, filter: f }),
-          getPurchaseLines({ search: s, filter: f }),
+          getPurchases({ search: s, filter: f, period: p, date: d || null }),
+          getPurchaseLines({ search: s, filter: f, period: p, date: d || null }),
           getPurchaseSummary(),
         ]);
         setRows(list);
@@ -729,13 +733,13 @@ export function PurchasesClient({
       mounted.current = true;
       return;
     }
-    const t = setTimeout(() => reload(search, filter), 250);
+    const t = setTimeout(() => reload(search, filter, period, date), 250);
     return () => clearTimeout(t);
-  }, [search, filter, reload]);
+  }, [search, filter, period, date, reload]);
 
-  useEffect(() => { setPage(1); }, [search, filter, station]);
+  useEffect(() => { setPage(1); }, [search, filter, period, date, station]);
 
-  const refresh = useCallback(() => reload(search, filter), [reload, search, filter]);
+  const refresh = useCallback(() => reload(search, filter, period, date), [reload, search, filter, period, date]);
 
   useRealtime(["purchases", "vendors"], refresh);
 
@@ -847,6 +851,10 @@ export function PurchasesClient({
         </div>
       </div>
 
+      <div className="mb-4">
+        <PeriodFilter value={period} onChange={setPeriod} date={date} onDateChange={setDate} />
+      </div>
+
       <StationChips
         stations={chipStations}
         value={station}
@@ -902,7 +910,7 @@ export function PurchasesClient({
           <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
             {byStation
               ? `Nothing bought for ${stationLabel} in these purchases. Assign products to a workstation on the Stock page, and their purchases appear here.`
-              : search || filter !== "all"
+              : search || filter !== "all" || period !== "today" || date
               ? "No purchases match that search."
               : "No purchases yet. Record one to add stock and track what you spent."}
           </p>

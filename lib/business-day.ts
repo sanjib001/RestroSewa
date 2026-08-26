@@ -339,3 +339,36 @@ export function businessPeriodBounds(
     }
   }
 }
+
+/**
+ * The same resolution as `businessPeriodBounds`, but as YYYY-MM-DD STRINGS
+ * rather than instants — for filtering a column that is itself a business-date
+ * string (e.g. `report_deliveries.period_key`), not a timestamptz.
+ *
+ * Deliberately NOT `businessPeriodBounds(...).from.toISOString().slice(0, 10)`:
+ * an instant's `toISOString()` reads back in UTC, which can name the WRONG Nepal
+ * calendar day (Nepal is UTC+05:45 — the exact class of bug this whole file
+ * exists to prevent, see the header note). Staying in string space the entire
+ * way sidesteps that conversion instead of relying on getting it right twice.
+ */
+export function businessPeriodDateBounds(
+  period: Exclude<BusinessPeriod, "yesterday" | "custom">,
+  hour: number,
+  now: Date = new Date()
+): { from: string | null; to: string | null } {
+  const today = businessToday(hour, now);
+  const tomorrow = addDaysStr(today, 1);
+
+  switch (period) {
+    case "today":
+      return { from: today, to: tomorrow };
+    case "week":
+      return { from: addDaysStr(today, -6), to: tomorrow };
+    case "month":
+      return { from: firstOfMonthStr(today), to: tomorrow };
+    case "year":
+      return { from: firstOfYearStr(today), to: tomorrow };
+    case "all":
+      return { from: null, to: null };
+  }
+}

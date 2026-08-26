@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { STOCK_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { dayBounds } from "@/lib/stock";
+import { historyPeriodBounds, type HistoryPeriod } from "@/lib/history-period";
 
 export type ActionResult = { error: string } | null;
 
@@ -135,6 +136,9 @@ export async function getPurchases(params?: {
   search?: string | null;
   filter?: PurchaseFilter;
   vendorId?: string | null;
+  period?: HistoryPeriod;
+  /** A specific business day (YYYY-MM-DD) — overrides `period` when given. */
+  date?: string | null;
 }): Promise<PurchaseRow[]> {
   const ru = await getRestaurantUser();
   if (!STOCK_ACCESS.canViewPurchases(ru)) return [];
@@ -149,6 +153,12 @@ export async function getPurchases(params?: {
   const filter = params?.filter ?? "all";
   if (filter !== "all") query = query.eq("payment_method", filter);
   if (params?.vendorId) query = query.eq("vendor_id", params.vendorId);
+
+  const period = params?.period ?? "today";
+  if (params?.date || period !== "all") {
+    const { from, to } = historyPeriodBounds(period, ru.closingHour, params?.date);
+    query = query.gte("created_at", from.toISOString()).lt("created_at", to.toISOString());
+  }
 
   const { data } = await query.order("created_at", { ascending: false }).limit(500);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -183,6 +193,9 @@ export async function getPurchases(params?: {
 export async function getPurchaseLines(params?: {
   search?: string | null;
   filter?: PurchaseFilter;
+  period?: HistoryPeriod;
+  /** A specific business day (YYYY-MM-DD) — overrides `period` when given. */
+  date?: string | null;
 }): Promise<PurchaseLineRow[]> {
   const ru = await getRestaurantUser();
   if (!STOCK_ACCESS.canViewPurchases(ru)) return [];
@@ -200,6 +213,12 @@ export async function getPurchaseLines(params?: {
 
   const filter = params?.filter ?? "all";
   if (filter !== "all") query = query.eq("payment_method", filter);
+
+  const period = params?.period ?? "today";
+  if (params?.date || period !== "all") {
+    const { from, to } = historyPeriodBounds(period, ru.closingHour, params?.date);
+    query = query.gte("created_at", from.toISOString()).lt("created_at", to.toISOString());
+  }
 
   const [billsRes, stationsRes] = await Promise.all([
     query.order("created_at", { ascending: false }).limit(500),

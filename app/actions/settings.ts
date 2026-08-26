@@ -15,6 +15,7 @@ import {
   type DailySummaryConfig,
 } from "@/lib/reports/daily-summary";
 import { sendDailySummary } from "@/lib/reports/daily-summary-send";
+import { historyPeriodDateBounds, type HistoryPeriod } from "@/lib/history-period";
 
 export type ActionResult = { error: string } | { ok: true } | null;
 
@@ -345,15 +346,33 @@ export type ReportDeliveryRow = {
 
 // The recent daily-report deliveries for this restaurant, newest first. Admin-only
 // (the report exposes takings), matching the rest of Settings.
-export async function getReportHistory(limit = 30): Promise<ReportDeliveryRow[]> {
+//
+// `period` narrows by `period_key` — the business date the REPORT covers, not
+// when it was sent — so "This Week" means "the last 7 days of reports", matching
+// what the row itself is about. Bounds come from `historyPeriodDateBounds`,
+// which stays in YYYY-MM-DD string space end to end — `period_key` is a
+// calendar day with no time component, and reconstructing a date string from a
+// Date instant (`.toISOString().slice(0, 10)`) reads back in UTC, which can name
+// the wrong Nepal day. See `business-day.ts`'s header note.
+export async function getReportHistory(
+  period: HistoryPeriod = "week",
+  date: string | null = null,
+  limit = 30
+): Promise<ReportDeliveryRow[]> {
   const { restaurantUser } = await requireRestaurantAdmin();
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (service as any)
+  let query = (service as any)
     .from("report_deliveries")
     .select("period_key, generated_at, sent_at, recipients, status, error, attempts")
     .eq("restaurant_id", restaurantUser.restaurant_id)
-    .eq("period_type", "daily")
+    .eq("period_type", "daily");
+
+  const { from, to } = historyPeriodDateBounds(period, restaurantUser.closingHour, date);
+  if (from) query = query.gte("period_key", from);
+  if (to) query = query.lt("period_key", to);
+
+  const { data } = await query
     .order("period_key", { ascending: false })
     .limit(Math.min(Math.max(1, limit), 100));
 
