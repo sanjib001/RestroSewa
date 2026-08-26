@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { loginWithPin } from "@/app/actions/auth";
 import type { AuthResult, StaffMember } from "@/app/actions/auth";
 import { Button } from "@/components/ui/button";
@@ -80,6 +80,7 @@ export function StaffLogin({ staff }: { staff: StaffMember[] }) {
     loginWithPin,
     null
   );
+  const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     if (state && "redirectTo" in state) {
@@ -97,6 +98,30 @@ export function StaffLogin({ staff }: { staff: StaffMember[] }) {
   function handleBack() {
     setPin((p) => p.slice(0, -1));
   }
+
+  // The keypad was screen-only — a manager on a laptop, or anyone with a barcode
+  // scanner wedged in as a keyboard, had no way to enter a PIN. Numbers and
+  // Backspace mirror the on-screen keys exactly; Enter submits once 4 digits are
+  // in, the same gate the "Sign in" button already enforces.
+  useEffect(() => {
+    if (!selected) return;
+    function onKey(e: KeyboardEvent) {
+      if (pending || isNavigating) return;
+      if (e.key >= "0" && e.key <= "9") {
+        e.preventDefault();
+        handleDigit(e.key);
+      } else if (e.key === "Backspace") {
+        e.preventDefault();
+        handleBack();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (pin.length === PIN_LENGTH) formRef.current?.requestSubmit();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, pin, pending, isNavigating]);
 
   if (!selected) {
     return (
@@ -171,7 +196,7 @@ export function StaffLogin({ staff }: { staff: StaffMember[] }) {
       <Keypad onDigit={handleDigit} onBack={handleBack} />
 
       {/* Hidden form carries the data; React handles the transition via form action */}
-      <form action={dispatch} className="w-full max-w-[240px] mt-4">
+      <form ref={formRef} action={dispatch} className="w-full max-w-[240px] mt-4">
         <input type="hidden" name="restaurant_user_id" value={selected.id} />
         <input type="hidden" name="pin" value={pin} />
         <Button
