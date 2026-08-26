@@ -4,6 +4,8 @@ import { STOCK_ACCESS } from "@/lib/permissions";
 import { hasRooms, normalizeBusinessType } from "@/lib/business-type";
 import { AdminSidebar } from "./admin/_components/admin-sidebar";
 import { OfflineGate } from "@/components/pwa/offline-gate";
+import { SubscriptionWatermark } from "@/components/subscription-watermark";
+import { subscriptionDaysRemaining } from "@/lib/subscription";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   // Layout allows any active staff member — individual pages guard their own permissions.
@@ -13,9 +15,17 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: restaurant } = await (service as any)
     .from("restaurants")
-    .select("name, logo_url, type")
+    .select("name, logo_url, type, install_date, subscription_extra_days")
     .eq("id", restaurantUser.restaurant_id)
     .single();
+
+  // Computed fresh every request — deliberately NOT the 60s-cached
+  // `getRestaurantConfig()` (not called from this layout today), since a
+  // countdown that says "today" should always mean today.
+  const daysRemaining = subscriptionDaysRemaining(
+    restaurant?.install_date ?? null,
+    restaurant?.subscription_extra_days ?? 0
+  );
 
   // A restaurant-only client has no hotel side, so the Rooms module is hidden
   // entirely (not just visually) — the link never renders and the page redirects.
@@ -48,6 +58,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       {/* The admin surface writes too — menu prices, stock, payroll — so it gets the
           same refusal-to-write-offline as the floor. */}
       <OfflineGate />
+      <SubscriptionWatermark daysRemaining={daysRemaining} />
     </div>
   );
 }

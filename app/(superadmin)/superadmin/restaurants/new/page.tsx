@@ -208,7 +208,7 @@ export default function NewRestaurantPage() {
         {/* Subscription tier */}
         <div className="flex flex-col gap-2">
           <FieldLabel>Subscription tier</FieldLabel>
-          <div className="flex gap-4">
+          <div className="flex gap-4 flex-wrap">
             {TIERS.map((t) => (
               <label
                 key={t.value}

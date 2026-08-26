@@ -92,7 +92,7 @@ function WorkstationCard({
             opacity: w.is_active ? 1 : 0.5,
           }}
         >
-          <span className="truncate">{w.name}</span>
+          <span className="min-w-0 truncate">{w.name}</span>
           {/* The code its items print under — its own dedicated Order Ticket. */}
           <span
             className="shrink-0 inline-flex items-center gap-1 text-xs uppercase tracking-wide px-1.5 py-0.5 rounded-full border"

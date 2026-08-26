@@ -570,8 +570,12 @@ export function MenuBrowser({
             // ADDS to the py-3 rather than replacing it (which `.pb-safe` would, leaving
             // 0 bottom padding on any device without a notch). Installed on an iPhone
             // this bar is the last thing on screen and the home indicator sits over the
-            // bottom ~34px — exactly where the Place order button is.
-            paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
+            // bottom ~34px — exactly where the Place order button is. The base 2.25rem
+            // (not 0.75rem) also clears the fixed subscription watermark
+            // (`components/subscription-watermark.tsx`), which sits `bottom-2` and,
+            // on mobile, centered under this same bar — without the extra room it
+            // sat right on top of the Place order button.
+            paddingBottom: "calc(2.25rem + env(safe-area-inset-bottom, 0px))",
           }}
         >
           {/* Each variant is its own line, so a staff member can see that the

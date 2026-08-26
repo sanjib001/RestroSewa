@@ -53,7 +53,7 @@ export function EditRestaurantForm({
       </div>
 
       {/* ── Business Info ── */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Field label="Business Name">
           <Input name="name" defaultValue={restaurant.name} required />
         </Field>
@@ -66,12 +66,12 @@ export function EditRestaurantForm({
         <Field label="Contact Email">
           <Input name="contact_email" type="email" defaultValue={restaurant.contact_email ?? ""} placeholder="Optional" />
         </Field>
-        <div className="col-span-2">
+        <div className="col-span-1 sm:col-span-2">
           <Field label="Address">
             <Input name="address" defaultValue={restaurant.address ?? ""} placeholder="Optional" />
           </Field>
         </div>
-        <div className="col-span-2">
+        <div className="col-span-1 sm:col-span-2">
           <Field label="Logo URL">
             <Input name="logo_url" defaultValue={restaurant.logo_url ?? ""} placeholder="https://…" />
           </Field>
@@ -79,7 +79,7 @@ export function EditRestaurantForm({
       </div>
 
       {/* ── Subscription ── */}
-      <div className="grid grid-cols-3 gap-4 pt-3 border-t" style={{ borderColor: "var(--color-hairline)" }}>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3 border-t" style={{ borderColor: "var(--color-hairline)" }}>
         <Field label="Subscription Plan">
           <select
             name="subscription_tier"
@@ -97,6 +97,24 @@ export function EditRestaurantForm({
         </Field>
         <Field label="Max Rooms">
           <Input name="max_rooms" type="number" min="0" defaultValue={restaurant.max_rooms ?? ""} placeholder="Unlimited" />
+        </Field>
+        <Field label="Install Date">
+          <input
+            name="install_date"
+            type="date"
+            defaultValue={restaurant.install_date ? restaurant.install_date.slice(0, 10) : ""}
+            className="h-9 rounded-sm border px-3 text-sm"
+            style={{ borderColor: "var(--color-hairline-input)", color: "var(--color-ink)", background: "var(--color-canvas)" }}
+          />
+        </Field>
+        <Field label="Additional Days">
+          <Input
+            name="subscription_extra_days"
+            type="number"
+            min="0"
+            max="3650"
+            defaultValue={restaurant.subscription_extra_days ?? 0}
+          />
         </Field>
       </div>
 

@@ -5,6 +5,7 @@ import { requireSuperAdmin } from "@/lib/auth/guards";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { revalidateRestaurantInfo } from "@/lib/restaurant-info";
+import { subscriptionDaysRemaining } from "@/lib/subscription";
 
 // The (superadmin) layout guards page RENDERING. A server action is a POST
 // endpoint in its own right — reachable without ever loading that layout — so
@@ -28,6 +29,8 @@ export type RestaurantRow = {
   contact_email: string | null;
   customer_ordering_enabled: boolean;
   qr_mode: string;
+  install_date: string | null;
+  subscription_extra_days: number;
 };
 
 export type RestaurantDetail = RestaurantRow & { settings: Record<string, unknown> };
@@ -50,7 +53,7 @@ export async function getAllRestaurants(): Promise<RestaurantRow[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (service as any)
     .from("restaurants")
-    .select("id, name, slug, type, is_active, subscription_tier, max_tables, max_rooms, logo_url, pan_vat_number, address, contact_phone, contact_email, customer_ordering_enabled, qr_mode, created_at")
+    .select("id, name, slug, type, is_active, subscription_tier, max_tables, max_rooms, logo_url, pan_vat_number, address, contact_phone, contact_email, customer_ordering_enabled, qr_mode, install_date, subscription_extra_days, created_at")
     .order("created_at", { ascending: false });
 
   return (data as RestaurantRow[]) ?? [];
@@ -66,7 +69,7 @@ export async function getRestaurantWithStaff(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: restaurant, error } = await (service as any)
     .from("restaurants")
-    .select("id, name, slug, type, is_active, subscription_tier, max_tables, max_rooms, logo_url, pan_vat_number, address, contact_phone, contact_email, customer_ordering_enabled, qr_mode, settings, created_at")
+    .select("id, name, slug, type, is_active, subscription_tier, max_tables, max_rooms, logo_url, pan_vat_number, address, contact_phone, contact_email, customer_ordering_enabled, qr_mode, install_date, subscription_extra_days, settings, created_at")
     .eq("id", id)
     .maybeSingle();
 
@@ -150,6 +153,12 @@ export async function createRestaurant(
   const validQrModes = ["ordering_enabled", "ordering_no_pin", "view_only"];
   if (!validQrModes.includes(qrMode)) return { error: "Invalid ordering mode." };
 
+  // Defaults the subscription clock to today rather than leaving it null — a
+  // superadmin who forgets to touch it still gets a real countdown, and can
+  // correct the date later if the actual install happened on a different day.
+  const today = new Date();
+  const installDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (service as any)
@@ -163,6 +172,7 @@ export async function createRestaurant(
       max_rooms: needsRooms ? maxRooms : null,
       customer_ordering_enabled: orderingEnabled,
       qr_mode: qrMode,
+      install_date: installDate,
     })
     .select("id")
     .single();
@@ -214,12 +224,20 @@ export async function updateRestaurant(
   const orderingEnabled = formData.get("customer_ordering_enabled") === "true";
   const qrMode = formData.get("qr_mode") as string || "ordering_enabled";
   const isActive = formData.get("is_active") === "true";
+  const installDate = (formData.get("install_date") as string)?.trim() || null;
+  const extraDaysRaw = (formData.get("subscription_extra_days") as string) ?? "";
+  const extraDays = extraDaysRaw === "" ? 0 : parseInt(extraDaysRaw, 10);
 
   const validTiers = ["free", "basic", "pro"];
   if (!validTiers.includes(tier)) return { error: "Invalid subscription tier." };
 
   const validQrModes = ["ordering_enabled", "ordering_no_pin", "view_only"];
   if (!validQrModes.includes(qrMode)) return { error: "Invalid QR mode." };
+
+  if (installDate && isNaN(new Date(installDate).getTime()))
+    return { error: "Invalid install date." };
+  if (isNaN(extraDays) || extraDays < 0 || extraDays > 3650)
+    return { error: "Additional days must be between 0 and 3650." };
 
   const maxTables = maxTablesRaw ? parseInt(maxTablesRaw, 10) : null;
   const maxRooms = maxRoomsRaw ? parseInt(maxRoomsRaw, 10) : null;
@@ -241,6 +259,8 @@ export async function updateRestaurant(
       customer_ordering_enabled: orderingEnabled,
       qr_mode: qrMode,
       is_active: isActive,
+      install_date: installDate,
+      subscription_extra_days: extraDays,
     })
     .eq("id", id);
 
@@ -250,6 +270,53 @@ export async function updateRestaurant(
   // whether a newly opened table mints a customer PIN — so it must take effect at once.
   revalidateRestaurantInfo(id);
   revalidatePath(`/superadmin/restaurants/${id}`);
+  revalidatePath("/superadmin/dashboard");
+  return null;
+}
+
+/**
+ * The Settings-page "Subscription" card's own save path — separate from
+ * `updateRestaurant` because that form already has its own explicit
+ * Active/Inactive control (`edit-restaurant-form.tsx`'s radio pair) that a
+ * superadmin may deliberately set for reasons unrelated to the subscription
+ * clock. This one has no such field to conflict with, so it's free to
+ * reactivate a restaurant itself the moment the new dates put it back in
+ * credit — "renew the subscription" should not need a second, separate click.
+ */
+export async function updateSubscriptionDates(
+  restaurantId: string,
+  installDate: string,
+  extraDays: number
+): Promise<ActionResult> {
+  await requireSuperAdmin();
+
+  if (!restaurantId) return { error: "Invalid request." };
+  if (!installDate || isNaN(new Date(installDate).getTime()))
+    return { error: "Choose a valid install date." };
+  if (!Number.isFinite(extraDays) || extraDays < 0 || extraDays > 3650)
+    return { error: "Additional days must be between 0 and 3650." };
+
+  const remaining = subscriptionDaysRemaining(installDate, extraDays);
+
+  const service = createServiceClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const update: any = { install_date: installDate, subscription_extra_days: extraDays };
+  // Only ever turns a restaurant ON here — never off. Taking one offline stays
+  // the dedicated Activate/Deactivate toggle's job (`toggleRestaurantStatus`),
+  // so this can't be used to silently deactivate anything.
+  if (remaining !== null && remaining > 0) update.is_active = true;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (service as any)
+    .from("restaurants")
+    .update(update)
+    .eq("id", restaurantId);
+
+  if (error) return { error: error.message };
+
+  revalidateRestaurantInfo(restaurantId);
+  revalidatePath(`/superadmin/restaurants/${restaurantId}`);
+  revalidatePath("/superadmin/settings");
   revalidatePath("/superadmin/dashboard");
   return null;
 }

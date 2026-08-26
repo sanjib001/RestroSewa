@@ -8,6 +8,7 @@ import { EditRestaurantForm } from "./edit-restaurant-form";
 import { LogoUploader } from "./logo-uploader";
 import { RestaurantLogo } from "@/components/branding/restaurant-logo";
 import { toggleRestaurantStatus } from "@/app/actions/restaurants";
+import { subscriptionDaysRemaining } from "@/lib/subscription";
 import { Button } from "@/components/ui/button";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -39,6 +40,10 @@ function Badge({
 
 export function RestaurantDetailClient({ restaurant }: { restaurant: RestaurantDetail }) {
   const [editing, setEditing] = useState(false);
+  const daysRemaining = subscriptionDaysRemaining(
+    restaurant.install_date,
+    restaurant.subscription_extra_days
+  );
 
   if (editing) {
     return <EditRestaurantForm restaurant={restaurant} onClose={() => setEditing(false)} />;
@@ -49,7 +54,7 @@ export function RestaurantDetailClient({ restaurant }: { restaurant: RestaurantD
       className="rounded-xl border px-6 py-5 mb-6"
       style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
     >
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3 min-w-0">
           <RestaurantLogo name={restaurant.name} logoUrl={restaurant.logo_url} size={44} />
           <div className="min-w-0">
@@ -64,7 +69,7 @@ export function RestaurantDetailClient({ restaurant }: { restaurant: RestaurantD
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 pt-0.5">
+        <div className="flex items-center gap-2 pt-0.5 flex-wrap">
           <Badge color={restaurant.is_active ? "#1a7a4a" : "#d1d5db"}>
             {restaurant.is_active ? "Active" : "Inactive"}
           </Badge>
@@ -80,6 +85,11 @@ export function RestaurantDetailClient({ restaurant }: { restaurant: RestaurantD
           >
             {restaurant.subscription_tier.toUpperCase()}
           </Badge>
+          {daysRemaining !== null && (
+            <Badge color={daysRemaining <= 0 ? "var(--color-ruby)" : daysRemaining < 30 ? "var(--color-ruby)" : "var(--color-ink-mute)"}>
+              {daysRemaining <= 0 ? "Expired" : `${daysRemaining} days left`}
+            </Badge>
+          )}
           <button
             type="button"
             onClick={() => setEditing(true)}
@@ -104,68 +114,72 @@ export function RestaurantDetailClient({ restaurant }: { restaurant: RestaurantD
       </div>
 
       <div
-        className="mt-4 pt-4 border-t grid grid-cols-2 gap-4 text-sm"
+        className="mt-4 pt-4 border-t grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm"
         style={{ borderColor: "var(--color-hairline)" }}
       >
-        <div>
+        {/* min-w-0 on the cell + break-all on the link: a grid item defaults to
+            min-width:auto same as a flex item, and a slug-based URL has no
+            spaces to wrap on — without both, a long restaurant slug forces this
+            cell (and the card around it) wider than a phone screen. */}
+        <div className="min-w-0">
           <p style={{ color: "var(--color-ink-mute)", fontSize: 11 }}>CUSTOMER URL</p>
           <Link
             href={`/c/${restaurant.slug}`}
             target="_blank"
-            className="flex items-center gap-1 mt-0.5"
+            className="flex items-center gap-1 mt-0.5 break-all"
             style={{ color: "var(--color-primary)" }}
           >
-            /c/{restaurant.slug} <ExternalLink size={11} />
+            /c/{restaurant.slug} <ExternalLink size={11} className="shrink-0" />
           </Link>
         </div>
-        <div>
+        <div className="min-w-0">
           <p style={{ color: "var(--color-ink-mute)", fontSize: 11 }}>STAFF LOGIN</p>
           <Link
             href={`/login?mode=staff&slug=${restaurant.slug}`}
             target="_blank"
-            className="flex items-center gap-1 mt-0.5"
+            className="flex items-center gap-1 mt-0.5 break-all"
             style={{ color: "var(--color-primary)" }}
           >
-            /login?mode=staff&amp;slug={restaurant.slug} <ExternalLink size={11} />
+            /login?mode=staff&amp;slug={restaurant.slug} <ExternalLink size={11} className="shrink-0" />
           </Link>
         </div>
         {restaurant.max_tables != null && (
-          <div>
+          <div className="min-w-0">
             <p style={{ color: "var(--color-ink-mute)", fontSize: 11 }}>MAX TABLES</p>
             <p className="mt-0.5" style={{ color: "var(--color-ink)" }}>{restaurant.max_tables}</p>
           </div>
         )}
         {restaurant.max_rooms != null && (
-          <div>
+          <div className="min-w-0">
             <p style={{ color: "var(--color-ink-mute)", fontSize: 11 }}>MAX ROOMS</p>
             <p className="mt-0.5" style={{ color: "var(--color-ink)" }}>{restaurant.max_rooms}</p>
           </div>
         )}
         {restaurant.contact_phone && (
-          <div>
+          <div className="min-w-0">
             <p style={{ color: "var(--color-ink-mute)", fontSize: 11 }}>PHONE</p>
             <p className="mt-0.5" style={{ color: "var(--color-ink)" }}>{restaurant.contact_phone}</p>
           </div>
         )}
         {restaurant.contact_email && (
-          <div>
+          <div className="min-w-0">
             <p style={{ color: "var(--color-ink-mute)", fontSize: 11 }}>EMAIL</p>
-            <p className="mt-0.5" style={{ color: "var(--color-ink)" }}>{restaurant.contact_email}</p>
+            <p className="mt-0.5 break-words" style={{ color: "var(--color-ink)" }}>{restaurant.contact_email}</p>
           </div>
         )}
         {restaurant.address && (
-          <div className="col-span-2">
+          <div className="col-span-1 sm:col-span-2 min-w-0">
             <p style={{ color: "var(--color-ink-mute)", fontSize: 11 }}>ADDRESS</p>
             <p className="mt-0.5" style={{ color: "var(--color-ink)" }}>{restaurant.address}</p>
           </div>
         )}
         {restaurant.pan_vat_number && (
-          <div>
+          <div className="min-w-0">
             <p style={{ color: "var(--color-ink-mute)", fontSize: 11 }}>PAN / VAT</p>
             <p className="mt-0.5" style={{ color: "var(--color-ink)" }}>{restaurant.pan_vat_number}</p>
           </div>
         )}
-        <div>
+        <div className="min-w-0">
           <p style={{ color: "var(--color-ink-mute)", fontSize: 11 }}>QR ORDERING</p>
           <p className="mt-0.5" style={{ color: "var(--color-ink)" }}>
             {restaurant.customer_ordering_enabled === false

@@ -981,7 +981,11 @@ function ItemCard({
       >
         <FoodMark type={item.food_type} size={13} />
 
-        <p className="flex-1 text-sm truncate" style={{ color: "var(--color-ink)" }}>
+        {/* min-w-0 is required, not defensive: `truncate` sets white-space:nowrap,
+            which makes this flex item's intrinsic min-width the FULL text width —
+            without min-w-0 a long name pushes the reorder arrows off screen
+            instead of ellipsizing. */}
+        <p className="flex-1 min-w-0 text-sm truncate" style={{ color: "var(--color-ink)" }}>
           {item.name}
           {item.is_featured && (
             <span className="ml-1.5 text-xs" style={{ color: "var(--color-warning)" }}>★</span>
@@ -1201,7 +1205,11 @@ function CategoryAccordion({
               ? <ChevronDown size={15} className="shrink-0" style={{ color: "var(--color-ink-mute)" }} />
               : <ChevronRight size={15} className="shrink-0" style={{ color: "var(--color-ink-mute)" }} />
             }
-            <span className="text-base font-medium truncate" style={{ color: cat.color }}>
+            {/* min-w-0 on this span too, not just the button: it's a flex item of
+                its OWN immediate flex container (this button), and `truncate`
+                sets white-space:nowrap — without it the category name's full
+                width wins over the item-count badge instead of ellipsizing. */}
+            <span className="text-base font-medium truncate min-w-0" style={{ color: cat.color }}>
               {category.name}
             </span>
             <span className="text-sm shrink-0" style={{ color: "var(--color-ink-mute)" }}>
@@ -1210,7 +1218,7 @@ function CategoryAccordion({
             {/* The description is the first thing to go when space is tight — it's the least
                 actionable part of the row. */}
             {category.description && (
-              <span className="text-xs truncate hidden md:inline" style={{ color: "var(--color-ink-mute)" }}>
+              <span className="text-xs truncate min-w-0 hidden md:inline" style={{ color: "var(--color-ink-mute)" }}>
                 · {category.description}
               </span>
             )}
