@@ -13,11 +13,24 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: restaurant } = await (service as any)
+  const { data: restaurant, error } = await (service as any)
     .from("restaurants")
     .select("name, logo_url, type, install_date, subscription_extra_days")
     .eq("id", restaurantUser.restaurant_id)
     .single();
+
+  // Every downstream default in this layout (name, logo, showRooms, the
+  // watermark) silently swallowed a failed query as "restaurant just has no
+  // name/logo set" — exactly how a migration lagging behind this layout's own
+  // code (querying columns the database doesn't have yet) presented as a
+  // missing logo and a missing watermark with nothing in any log to explain
+  // it. Throw instead, same as `getAllRestaurants`.
+  if (error) {
+    throw new Error(
+      `AdminLayout: restaurant lookup failed for ${restaurantUser.restaurant_id} — ` +
+        `${error.code ?? "?"} ${error.message ?? error}`
+    );
+  }
 
   // Computed fresh every request — deliberately NOT the 60s-cached
   // `getRestaurantConfig()` (not called from this layout today), since a

@@ -51,10 +51,21 @@ export async function getAllRestaurants(): Promise<RestaurantRow[]> {
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (service as any)
+  const { data, error } = await (service as any)
     .from("restaurants")
     .select("id, name, slug, type, is_active, subscription_tier, max_tables, max_rooms, logo_url, pan_vat_number, address, contact_phone, contact_email, customer_ordering_enabled, qr_mode, install_date, subscription_extra_days, created_at")
     .order("created_at", { ascending: false });
+
+  // Same reasoning as `getRestaurantWithStaff` below: a failed query and an
+  // empty restaurants table produced the IDENTICAL `data: null` → `[]` here,
+  // which is precisely how a migration lagging one environment behind its own
+  // app code (a column this select names that doesn't exist yet) silently
+  // rendered as "0 restaurants" on the whole superadmin dashboard, with
+  // nothing in any log to say why. Throw instead — the caller's empty state
+  // should mean "there are genuinely no restaurants," never "the query broke."
+  if (error) {
+    throw new Error(`getAllRestaurants(): query failed — ${error.code ?? "?"} ${error.message ?? error}`);
+  }
 
   return (data as RestaurantRow[]) ?? [];
 }
@@ -186,19 +197,27 @@ export async function createRestaurant(
   return { redirectTo: `/superadmin/restaurants/${data.id}` };
 }
 
-export async function toggleRestaurantStatus(id: string, makeActive: boolean) {
+export async function toggleRestaurantStatus(id: string, makeActive: boolean): Promise<ActionResult> {
   await requireSuperAdmin();
 
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (service as any)
+  const { error } = await (service as any)
     .from("restaurants")
     .update({ is_active: makeActive })
     .eq("id", id);
 
+  // The one caller (`settings-client.tsx`) used to update its local toggle
+  // state UNCONDITIONALLY right after calling this — so a failed write (a
+  // dropped connection, a stale schema) still flipped the switch on screen,
+  // with the database quietly disagreeing underneath it. Returning the error
+  // is what lets the caller only apply that optimistic update on success.
+  if (error) return { error: error.message };
+
   revalidateRestaurantInfo(id);
   revalidatePath(`/superadmin/restaurants/${id}`);
   revalidatePath("/superadmin/dashboard");
+  return null;
 }
 
 export async function updateRestaurant(
