@@ -2,14 +2,8 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { hasPermission, PERMISSIONS } from "@/lib/permissions";
-import {
-  getMenuCategories,
-  getMenuItemsByCategory,
-  getAvailableVariants,
-} from "@/app/actions/menu";
-import { getWorkstations } from "@/app/actions/workstations";
+import { getAddItemsMenuData } from "@/lib/menu-browser-data";
 import { createServiceClient } from "@/lib/supabase/service";
-import type { MenuItemRow } from "@/app/actions/menu";
 import { MenuBrowser } from "./_components/menu-browser";
 import { ChevronLeft } from "lucide-react";
 
@@ -125,24 +119,8 @@ export default async function AddItemsPage({
     );
   }
 
-  const categories = await getMenuCategories(restaurant_id);
-  const activeCategories = categories.filter((c) => c.is_active);
-
-  const itemsByCategory = await Promise.all(
-    activeCategories.map((c) => getMenuItemsByCategory(restaurant_id, c.id))
-  );
-  const allItems: MenuItemRow[] = itemsByCategory.flat().filter((i) => i.availability_status === "available");
-
-  // Variants for the whole menu in one query — a staff member taking an order
-  // needs to pick the size at the counter, same as a guest does on their phone.
-  const variants = await getAvailableVariants(restaurant_id);
-
-  // Custom (off-menu) items are gated by their own permission and can be routed to a
-  // workstation. Fetch the stations for the picker only when the user may add them.
-  const canAddCustom = hasPermission(restaurantUser, PERMISSIONS.MANAGE_CUSTOM_ITEMS);
-  const workstations = canAddCustom
-    ? (await getWorkstations(restaurant_id)).map((w) => ({ id: w.id, name: w.name }))
-    : [];
+  const { categories: activeCategories, items: allItems, variants, canAddCustom, workstations } =
+    await getAddItemsMenuData(restaurantUser);
 
   return (
     <div className="flex flex-col" style={{ height: SCREEN_UNDER_NAV }}>

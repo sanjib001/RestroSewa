@@ -43,7 +43,14 @@ export default async function EmployeeLayout({ children }: { children: React.Rea
   );
 
   return (
-    <div className="min-h-screen" style={{ background: "var(--color-canvas-soft)" }}>
+    // `min-h-dvh`, NOT `min-h-screen` (`100vh`): on a phone whose browser toolbar
+    // is currently showing, the dynamic viewport (`dvh`) is SHORTER than `vh` by
+    // the toolbar's height. The split-view sizes itself to `100dvh` throughout
+    // (`SCREEN_UNDER_NAV` in `session-split-view.tsx`) so its content sums to
+    // exactly the visible viewport — but a `100vh` floor on this ancestor forced
+    // the page to be at least that much taller anyway, and the leftover sliver
+    // between `vh` and `dvh` was exactly the "whole section is scrollable" gap.
+    <div className="min-h-dvh" style={{ background: "var(--color-canvas-soft)" }}>
       <StaffNav
         restaurantName={restaurant?.name ?? "Restaurant"}
         restaurantLogo={restaurant?.logo_url ?? null}

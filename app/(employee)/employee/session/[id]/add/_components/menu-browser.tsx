@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useActionState, useTransition, useMemo, useRef } from "react";
+import { useState, useActionState, useTransition, useMemo, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { submitOrder } from "@/app/actions/pos";
 import type { ActionResult, CartItem } from "@/app/actions/pos";
 import type { CategoryRow, MenuItemRow, VariantRow } from "@/app/actions/menu";
@@ -45,6 +46,7 @@ export function MenuBrowser({
   variants,
   canAddCustom = false,
   workstations = [],
+  onOrderPlaced,
 }: {
   sessionId: string;
   categories: CategoryRow[];
@@ -54,7 +56,18 @@ export function MenuBrowser({
   canAddCustom?: boolean;
   /** Stations a custom item can be routed to (empty ⇒ bill-only is the only choice). */
   workstations?: Workstation[];
+  /**
+   * Called once an order successfully submits (after the cart's already been
+   * cleared). Omit it and this navigates back to the session page itself —
+   * the standalone mobile `/add` route's behavior, and the only sensible
+   * default for a component that otherwise has no way to know it's not the
+   * whole page. The desktop/tablet split-view passes its own callback (switch
+   * the tab, refresh) instead, since there it stays mounted in a pane rather
+   * than being the page.
+   */
+  onOrderPlaced?: () => void;
 }) {
+  const router = useRouter();
   const [activeCategoryId, setActiveCategoryId] = useState<string>(categories[0]?.id ?? "");
   const [query, setQuery] = useState("");
   const [cart, setCart] = useState<Map<LineKey, number>>(new Map());
@@ -71,6 +84,24 @@ export function MenuBrowser({
   const [cQty, setCQty] = useState(1);
   const [cNote, setCNote] = useState("");
   const [cStation, setCStation] = useState<string>("");
+
+  // `submitOrder` no longer redirects on success (it can't — this component may
+  // be mounted in a persistent split-view pane, not a standalone page) — it
+  // just returns `null`, indistinguishable from the action never having run.
+  // So success is detected the same way `wasPending` refs elsewhere in this
+  // codebase detect a `useActionState` completing cleanly (e.g.
+  // `ImportCreditForm`): a pending→not-pending transition with no error.
+  const wasPending = useRef(false);
+  useEffect(() => {
+    if (wasPending.current && !pending && !(state && "error" in state)) {
+      setCart(new Map());
+      setCustomLines([]);
+      if (onOrderPlaced) onOrderPlaced();
+      else router.push(`/employee/session/${sessionId}`);
+    }
+    wasPending.current = pending;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending, state]);
 
   const variantsOf = useMemo(() => {
     const m = new Map<string, VariantRow[]>();
@@ -293,7 +324,7 @@ export function MenuBrowser({
       {/* Items grid */}
       {/* The ONLY scrolling region. `min-h-0` again, for the same reason as the root:
           this is what makes the menu scroll instead of growing the column. */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-4">
+      <div className="flex-1 min-h-0 overflow-y-auto menu-scrollbar p-4">
         {visibleItems.length === 0 ? (
           <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
             {searching ? `No items match “${query.trim()}”.` : "No items in this category."}

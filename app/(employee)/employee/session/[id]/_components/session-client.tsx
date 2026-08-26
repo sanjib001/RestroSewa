@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useTransition, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   closeSessionWithPayment,
   updateOrderItemStatus,
@@ -52,10 +53,41 @@ function PaymentForm({
    *  so the field isn't shown. The PIN is still verified server-side at payment. */
   discountEnabled: boolean;
 }) {
-  const [state, action, pending] = useActionState<ActionResult, FormData>(
-    closeSessionWithPayment,
-    null
-  );
+  // A directly-controlled submit rather than `useActionState` + native `<form
+  // action>` — that combination relies on `pending` reliably flipping
+  // true→false in the same render cycle a `wasPending` ref effect can catch,
+  // and in testing the post-close redirect this drove sometimes just never
+  // fired. This version awaits the action itself and reacts to its result in
+  // the SAME function call — no separate effect, no transition-timing to get
+  // right — mirroring the already-reliable `run()` in `tables-grid.tsx`.
+  const [state, setState] = useState<ActionResult>(null);
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    startTransition(async () => {
+      // The CREDIT branch of `closeSessionWithPayment` still redirects itself
+      // (to the dashboard's credit view — a different, deliberate
+      // destination) by throwing — NOT caught here, so it propagates and
+      // Next performs that navigation on its own; this code simply never
+      // reaches the lines below for that branch.
+      const res = await closeSessionWithPayment(null, formData);
+      if (res?.error) {
+        setState(res);
+        return;
+      }
+      setState(null);
+      // Destination: Sales, not the previous table or the dashboard — a
+      // normal paid-in-full close is the one flow that ends with printing
+      // the bill. `?session=` (not just `?focus=sales`) is what lets Sales
+      // scroll straight to and ring THIS bill specifically, rather than
+      // leaving the cashier to find it in today's list themselves — see
+      // `sales-view.tsx`'s `highlightSessionId`.
+      router.push(`/employee/dashboard?focus=sales&session=${session.id}`);
+    });
+  }
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [cashAmt, setCashAmt]     = useState("");
   const [onlineAmt, setOnlineAmt] = useState("");
@@ -191,7 +223,7 @@ function PaymentForm({
 
   return (
     <form
-      action={action}
+      onSubmit={handleSubmit}
       className="rounded-xl border px-5 py-5 flex flex-col gap-4"
       style={{ background: "var(--color-canvas)", borderColor: "var(--color-primary)", borderWidth: 1.5 }}
     >
@@ -925,6 +957,7 @@ export function SessionClient({
   discountEnabled?: boolean;
   canCancelOrders?: boolean;
 }) {
+  const router = useRouter();
   const [forceClosing, startForceClose] = useTransition();
   const [forceError, setForceError] = useState<string | null>(null);
   const hasOrders = session.items.length > 0;
@@ -1027,8 +1060,12 @@ export function SessionClient({
       {/* Actions */}
       {!isClosed && (
         <>
+          {/* Desktop/tablet reaches the same menu through the split-view's own
+              "Menu" tab (see session-split-view.tsx) instead of navigating to
+              a separate page, so this button — and the navigation it does —
+              is mobile-only. */}
           {canCreateOrders && (
-            <Link href={`/employee/session/${session.id}/add`}>
+            <Link href={`/employee/session/${session.id}/add`} className="lg:hidden">
               <Button variant="secondary" className="w-full flex items-center justify-center gap-2">
                 <Plus size={14} />
                 Add items
@@ -1091,7 +1128,20 @@ export function SessionClient({
                     setForceError(null);
                     startForceClose(async () => {
                       const res = await forceCloseSession(session.id);
-                      if (res?.error) setForceError(res.error);
+                      if (res?.error) {
+                        setForceError(res.error);
+                      } else if (window.matchMedia("(min-width: 1024px)").matches) {
+                        // Desktop/tablet: don't navigate anywhere — stay on this exact
+                        // page. `isClosed` (below) already swaps the whole Actions block
+                        // for the "Session closed" banner once `session.status` flips, so
+                        // a refresh is all that's needed to show the table as closed in
+                        // place, with the persistent rail right where it was.
+                        router.refresh();
+                      } else {
+                        // Mobile has no rail to stay near, so this goes home instead —
+                        // same as it always has.
+                        router.push("/employee/dashboard");
+                      }
                     });
                   }
                 }}

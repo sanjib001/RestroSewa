@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname, unstable_rethrow } from "next/navigation";
 import { memo, useCallback, useEffect, useState, useTransition } from "react";
 import { getMyTables, openTableSession, markTableClean } from "@/app/actions/pos";
 import type { TableStatus } from "@/app/actions/pos";
@@ -14,12 +14,20 @@ import { Sparkles, LayoutGrid, MoveRight } from "lucide-react";
 
 const CARD =
   "flex flex-col items-center justify-center rounded-xl border w-full p-2 text-center transition-all";
+// Compact: the same card embedded in the session split-view's narrow left rail.
+// Fixed, deliberately small — never `1fr` — because a stretchy `minmax(_, 1fr)`
+// column is exactly what made these tiles balloon back up once the panel only
+// fit one column wide: with nothing to share the row with, `1fr` handed a
+// single tile the whole row's width. A fixed size can't be stretched.
+const CARD_COMPACT =
+  "flex flex-col items-center justify-center rounded-lg border w-full p-1 text-center transition-all";
 
 // The table number is the card's whole point, so it's the one thing that should be readable
 // from arm's length across a busy floor — bumped a step, and to weight 400 so it doesn't look
 // faint against the tinted panel. (Inter 400/500/600 are real cuts now, not faux-bold.)
 const NUMBER = "font-normal leading-tight break-words line-clamp-2 w-full";
 const NUMBER_STYLE = { letterSpacing: "-0.3px", fontSize: "clamp(1.05rem, 3.6vw, 1.6rem)" } as const;
+const NUMBER_STYLE_COMPACT = { letterSpacing: "-0.2px", fontSize: "0.8rem" } as const;
 
 /**
  * `memo` so refetching the list re-renders only the cards whose data actually
@@ -39,6 +47,8 @@ const TableCard = memo(function TableCard({
   table,
   busy,
   canShift,
+  isCurrent,
+  compact,
   onOpen,
   onClean,
   onShift,
@@ -47,6 +57,14 @@ const TableCard = memo(function TableCard({
   /** Owned by the GRID, not this card — see the note on TablesGrid.run. */
   busy: boolean;
   canShift: boolean;
+  /** The table whose session page this grid is embedded in (the split-view's
+   *  own left panel) — undefined everywhere else, e.g. the plain dashboard,
+   *  where there is no "current" table to mark. */
+  isCurrent?: boolean;
+  /** Small, dense rendering for the session split-view's nav-rail-like left
+   *  panel — number + a status dot only, no status word, no shift control
+   *  (shifting from mid-table isn't this panel's job). */
+  compact?: boolean;
   onOpen: (id: string) => void;
   onClean: (id: string) => void;
   onShift: (t: TableStatus) => void;
@@ -54,6 +72,9 @@ const TableCard = memo(function TableCard({
   const opening = busy;
   const cleaning = busy;
   const router = useRouter();
+  const card = compact ? CARD_COMPACT : CARD;
+  const numberStyle = compact ? NUMBER_STYLE_COMPACT : NUMBER_STYLE;
+  const minHeight = compact ? 44 : 88;
 
   // In use — the one card that's solid-filled. A busy table is the thing a cashier looks for,
   // so it's the loudest state; free tables stay quiet even when there are 55 of them.
@@ -73,19 +94,29 @@ const TableCard = memo(function TableCard({
           // touch fires ~100ms before the click lands and is plenty.
           prefetch={false}
           onPointerDown={() => router.prefetch(`/employee/session/${table.session_id}`)}
-          className={`${CARD} hover:brightness-110`}
+          className={`${card} hover:brightness-110`}
           // Constant blue FILL, not s.color: the status token flips to a light blue in dark that
           // the white number can't sit on. This keeps the in-use card a solid readable blue in both.
-          style={{ minHeight: 88, background: "var(--fill-blue)", borderColor: "var(--fill-blue)" }}
+          // `isCurrent` adds an OUTER ring via box-shadow rather than changing the border
+          // itself — the border stays the fill color (so the tile's own shape stays crisp),
+          // the ring sits a couple pixels outside it as a "you are here" mark.
+          style={{
+            minHeight,
+            background: "var(--fill-blue)",
+            borderColor: "var(--fill-blue)",
+            boxShadow: isCurrent ? "0 0 0 3px var(--color-canvas), 0 0 0 5px var(--color-primary)" : undefined,
+          }}
         >
-          <span className={NUMBER} style={{ ...NUMBER_STYLE, color: "#fff" }}>
+          <span className={NUMBER} style={{ ...numberStyle, color: "#fff" }}>
             {table.number}
           </span>
-          <span className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.9)" }}>
-            Active
-          </span>
+          {!compact && (
+            <span className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.9)" }}>
+              Active
+            </span>
+          )}
         </Link>
-        {canShift && (
+        {canShift && !compact && (
           <button
             type="button"
             aria-label={`Shift table ${table.number}`}
@@ -110,10 +141,10 @@ const TableCard = memo(function TableCard({
     return (
       <div
         title={`Table ${table.number} — needs cleaning`}
-        className={CARD}
-        style={{ minHeight: 88, background: s.soft, borderColor: s.color, opacity: cleaning ? 0.5 : 1 }}
+        className={card}
+        style={{ minHeight, background: s.soft, borderColor: s.color, opacity: cleaning ? 0.5 : 1 }}
       >
-        <span className={NUMBER} style={{ ...NUMBER_STYLE, color: s.color }}>
+        <span className={NUMBER} style={{ ...numberStyle, color: s.color }}>
           {table.number}
         </span>
         <button
@@ -126,9 +157,9 @@ const TableCard = memo(function TableCard({
           style={{ borderColor: s.color, color: s.color, background: "transparent" }}
         >
           <Sparkles size={10} className="shrink-0" />
-          {cleaning ? "…" : "Mark clean"}
+          {cleaning ? "…" : compact ? "Clean" : "Mark clean"}
         </button>
-        {waited && (
+        {waited && !compact && (
           <span className="text-[11px] mt-0.5" style={{ color: s.color, opacity: 0.85 }}>
             {waited}
           </span>
@@ -148,21 +179,25 @@ const TableCard = memo(function TableCard({
       disabled={opening}
       title={`Table ${table.number} — free`}
       onClick={() => onOpen(table.id)}
-      className={`${CARD} hover:brightness-95`}
+      className={`${card} hover:brightness-95`}
       style={{
-        minHeight: 88,
+        minHeight,
         background: a.soft,
         borderColor: a.color,
         opacity: opening ? 0.5 : 1,
       }}
     >
-      <span className={NUMBER} style={{ ...NUMBER_STYLE, color: "var(--color-ink)" }}>
+      <span className={NUMBER} style={{ ...numberStyle, color: "var(--color-ink)" }}>
         {table.number}
       </span>
-      <span className="text-xs mt-1 inline-flex items-center gap-1" style={{ color: a.color }}>
-        <span aria-hidden className="w-1.5 h-1.5 rounded-full" style={{ background: a.color }} />
-        Free
-      </span>
+      {compact ? (
+        <span aria-hidden className="w-1.5 h-1.5 rounded-full mt-1" style={{ background: a.color }} />
+      ) : (
+        <span className="text-xs mt-1 inline-flex items-center gap-1" style={{ color: a.color }}>
+          <span aria-hidden className="w-1.5 h-1.5 rounded-full" style={{ background: a.color }} />
+          Free
+        </span>
+      )}
     </button>
   );
 });
@@ -181,16 +216,32 @@ export function TablesGrid({
   initial,
   hasAnyTables,
   canShift = false,
+  compact = false,
 }: {
   initial: TableStatus[];
   hasAnyTables: boolean;
   canShift?: boolean;
+  /** Dense nav-rail rendering for the session split-view's narrow left
+   *  panel — see `TableCard`'s `compact`. */
+  compact?: boolean;
 }) {
   const [tables, setTables] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const [shifting, setShifting] = useState<TableStatus | null>(null);
   const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
   const [, startTransition] = useTransition();
+
+  // Which table is "current" — a blue ring on its card — read straight off the
+  // URL rather than passed down as a prop. This grid now lives in a layout
+  // ABOVE `session/[id]` (`session/layout.tsx`) specifically so it persists,
+  // unfetched and unflashed, across navigations between different tables'
+  // session pages; a layout at that level has no access to the `id` param, but
+  // a mounted client component sees the pathname change and just re-renders
+  // (no refetch, no remount) to move the ring — exactly what's wanted.
+  const pathname = usePathname();
+  const activeSessionId = pathname?.startsWith("/employee/session/")
+    ? pathname.split("/")[3]
+    : undefined;
 
   const resync = useCallback(() => {
     startTransition(async () => {
@@ -234,7 +285,14 @@ export function TablesGrid({
         const r = await action();
         // On success openTableSession REDIRECTS and never returns; only failures land here.
         if (r && "error" in r) setError(r.error);
-      } catch {
+      } catch (e) {
+        // `redirect()` (a successful `openTableSession`, most of the time) works by
+        // THROWING a special Next.js control-flow error — it has to propagate past
+        // this catch for Next to actually perform the navigation. Without this, every
+        // successful table-open still landed here, fired the toast below, AND (since
+        // the throw never reached Next's own handling) may not even have navigated
+        // reliably — the exact "shows every time" bug this was.
+        unstable_rethrow(e);
         setError("That didn't go through. Please try again.");
       } finally {
         setBusy((prev) => {
@@ -259,18 +317,35 @@ export function TablesGrid({
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
-        <p className="text-base font-medium" style={{ color: SECTION_ACCENT.tables.color }}>Tables</p>
-        {/* Counts echo the cards: free = the section's tinted blue (outline), active = the same
-            blue solid, cleaning = the cross-cutting orange. Summary and grid teach each other.
-            Zero-count states are dropped rather than shown as "0", which is noise on a small screen. */}
-        <span className="inline-flex items-center gap-1.5 flex-wrap">
-          {free > 0 && <CountPill n={free} label="free" tone={SECTION_ACCENT.tables} />}
-          {active > 0 && <CountPill n={active} label="active" tone={STATUS_STYLE.active} fill="var(--fill-blue)" />}
-          {dirty > 0 && <CountPill n={dirty} label="cleaning" tone={STATUS_STYLE.cleaning} />}
-          <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>{tables.length} total</span>
-        </span>
-      </div>
+      {compact ? (
+        // Nav-rail header: the section name plus a single dot-count line, sticky
+        // above the tiles rather than a full pill row — the pills are built for
+        // a wide dashboard header, not a 132px rail.
+        <div
+          className="sticky top-0 z-10 mb-2 pb-2 border-b"
+          style={{ background: "var(--color-canvas-soft)", borderColor: "var(--color-hairline)" }}
+        >
+          <p className="text-[11px] font-medium uppercase tracking-wide" style={{ color: SECTION_ACCENT.tables.color }}>
+            Tables
+          </p>
+          <p className="text-[11px] mt-0.5" style={{ color: "var(--color-ink-mute)" }}>
+            {active} active · {free} free{dirty > 0 ? ` · ${dirty} cleaning` : ""}
+          </p>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
+          <p className="text-base font-medium" style={{ color: SECTION_ACCENT.tables.color }}>Tables</p>
+          {/* Counts echo the cards: free = the section's tinted blue (outline), active = the same
+              blue solid, cleaning = the cross-cutting orange. Summary and grid teach each other.
+              Zero-count states are dropped rather than shown as "0", which is noise on a small screen. */}
+          <span className="inline-flex items-center gap-1.5 flex-wrap">
+            {free > 0 && <CountPill n={free} label="free" tone={SECTION_ACCENT.tables} />}
+            {active > 0 && <CountPill n={active} label="active" tone={STATUS_STYLE.active} fill="var(--fill-blue)" />}
+            {dirty > 0 && <CountPill n={dirty} label="cleaning" tone={STATUS_STYLE.cleaning} />}
+            <span className="text-sm" style={{ color: "var(--color-ink-mute)" }}>{tables.length} total</span>
+          </span>
+        </div>
+      )}
 
       {tables.length === 0 ? (
         <div
@@ -301,8 +376,16 @@ export function TablesGrid({
             </p>
           )}
           <div
-            className="grid gap-2.5"
-            style={{ gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))" }}
+            className={compact ? "grid gap-1.5" : "grid gap-2.5"}
+            style={
+              compact
+                // Fixed tile size, not `1fr`: `1fr` is what stretched a single
+                // fitting column to fill the whole rail. `auto-fill` still packs
+                // as many 48px columns as fit — two, at this rail's width —
+                // and leaves the remainder unused rather than inflating tiles.
+                ? { gridTemplateColumns: "repeat(auto-fill, 48px)" }
+                : { gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))" }
+            }
           >
             {tables.map((t) => (
               <TableCard
@@ -310,6 +393,8 @@ export function TablesGrid({
                 table={t}
                 busy={busy.has(t.id)}
                 canShift={canShift}
+                isCurrent={!!activeSessionId && t.session_id === activeSessionId}
+                compact={compact}
                 onOpen={onOpen}
                 onClean={onClean}
                 onShift={onShift}

@@ -166,10 +166,16 @@ function TxnCard({
   txn,
   canEditTender,
   onEdited,
+  highlighted = false,
 }: {
   txn: SalesTxn;
   canEditTender: boolean;
   onEdited: () => void;
+  /** This is the bill a table's session just closed with — see `SalesView`'s
+   *  `highlightSessionId`. Gets its own ring and an id to scroll to, so
+   *  landing here from "close & collect payment" points straight at the
+   *  receipt that needs printing instead of the general list. */
+  highlighted?: boolean;
 }) {
   const location = txn.table_number
     ? `Table ${txn.table_number}`
@@ -190,10 +196,13 @@ function TxnCard({
 
   return (
     <div
+      id={`sales-txn-${txn.id}`}
       className="rounded-xl border px-4 py-3 flex items-center gap-3"
       style={{
         background: "var(--color-canvas)",
-        borderColor: onCredit ? `${tone}44` : "var(--color-hairline)",
+        borderColor: highlighted ? "var(--color-primary)" : onCredit ? `${tone}44` : "var(--color-hairline)",
+        borderWidth: highlighted ? 1.5 : 1,
+        boxShadow: highlighted ? "0 0 0 3px color-mix(in srgb, var(--color-primary) 20%, transparent)" : undefined,
       }}
     >
       <div
@@ -230,8 +239,10 @@ function TxnCard({
           </p>
         )}
       </div>
-      {/* Reprint the bill on demand — reuses the payment record. */}
-      <PaidBillButton paymentId={txn.id} />
+      {/* Reprint the bill on demand — reuses the payment record. Auto-opens for
+          the highlighted bill, so landing here from "close & collect payment"
+          costs zero extra taps to print. */}
+      <PaidBillButton paymentId={txn.id} autoOpen={highlighted} />
       {/* Owner-only tender correction — only for a fully-settled, non-credit bill. */}
       {canEditTender && !onCredit && txn.method !== "credit" && (
         <TenderEditButton paymentId={txn.id} onEdited={onEdited} />
@@ -244,11 +255,17 @@ export function SalesView({
   initial,
   embedded = false,
   canEditTender = false,
+  highlightSessionId = null,
 }: {
   initial: SalesReport;
   embedded?: boolean;
   /** Owner + Security PIN set → each settled bill gets a tender-edit control. */
   canEditTender?: boolean;
+  /** A session that just closed with a full payment — scroll straight to ITS
+   *  bill and ring it, rather than leaving the cashier to scan today's list
+   *  for the one they were just looking at. Set from `?session=` on the
+   *  dashboard route (`closeSessionWithPayment`'s success redirect). */
+  highlightSessionId?: string | null;
 }) {
   const [report, setReport] = useState<SalesReport>(initial);
   const [period, setPeriod] = useState<SalesPeriod>(initial.period);
@@ -263,6 +280,10 @@ export function SalesView({
     return () => { activeRef.current = false; };
   }, []);
 
+  const highlightTxnId = highlightSessionId
+    ? report.transactions.find((t) => t.session_id === highlightSessionId)?.id ?? null
+    : null;
+
   const load = useCallback((p: SalesPeriod, from?: string, to?: string) => {
     startTransition(async () => {
       try {
@@ -273,6 +294,41 @@ export function SalesView({
       }
     });
   }, []);
+
+  // Landing here via the redirect (rather than a full page reload) sometimes
+  // outran the write it's supposed to show: the bill that JUST closed isn't
+  // in `initial.transactions` yet, so there's nothing to find or scroll to.
+  // A reload always re-fetches from scratch and therefore always has it —
+  // this reproduces exactly that, once, rather than waiting on `resync`'s
+  // realtime round trip (`useRealtime` below) to eventually correct it.
+  const refetchedForHighlight = useRef(false);
+  useEffect(() => {
+    if (!highlightSessionId || highlightTxnId || refetchedForHighlight.current || period !== "today") return;
+    refetchedForHighlight.current = true;
+    load("today");
+  }, [highlightSessionId, highlightTxnId, period, load]);
+
+  // Retries rather than a one-shot scroll, for the SAME reason
+  // `staff-dashboard.tsx`'s own `#sec-{focus}` scroll does: this can only
+  // succeed once the row exists, which depends on the refetch above landing.
+  // Retrying (rather than firing once and giving up) also means this reliably
+  // has the LAST word on scroll position — it keeps asserting until it
+  // succeeds, so it wins over the dashboard's own section-level scroll
+  // regardless of which happens to resolve first.
+  useEffect(() => {
+    if (!highlightTxnId) return;
+    let tries = 0;
+    const timer = setInterval(() => {
+      const el = document.getElementById(`sales-txn-${highlightTxnId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        clearInterval(timer);
+      } else if (++tries > 20) {
+        clearInterval(timer);
+      }
+    }, 150);
+    return () => clearInterval(timer);
+  }, [highlightTxnId]);
 
   const selectPeriod = useCallback((p: SalesPeriod) => {
     setPeriod(p);
@@ -542,7 +598,13 @@ export function SalesView({
                 </div>
                 <div className="flex flex-col gap-2">
                   {g.items.map((t) => (
-                    <TxnCard key={t.id} txn={t} canEditTender={canEditTender} onEdited={resync} />
+                    <TxnCard
+                      key={t.id}
+                      txn={t}
+                      canEditTender={canEditTender}
+                      onEdited={resync}
+                      highlighted={t.id === highlightTxnId}
+                    />
                   ))}
                 </div>
               </div>

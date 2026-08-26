@@ -970,7 +970,14 @@ export async function submitOrder(
   await emitNewOrder(service, ru.restaurant_id, order.id as string);
 
   revalidatePath("/employee/queue");
-  redirect(`/employee/session/${sessionId}`);
+  // Not a redirect(): the desktop/tablet split-view keeps `MenuBrowser` mounted in
+  // a right-hand pane after placing an order — a page-level navigation would tear
+  // that pane down. `MenuBrowser` itself decides what happens next on success
+  // (see its `onOrderPlaced` prop): the standalone mobile /add route navigates
+  // back to the session page client-side, the split-view just switches its own
+  // tab and refreshes. Revalidated here so either path lands on fresh data.
+  revalidatePath(`/employee/session/${sessionId}`);
+  return null;
 }
 
 // ─── Update Item Status ───────────────────────────────────────────────────────
@@ -1494,7 +1501,12 @@ export async function closeSessionWithPayment(
 
   revalidatePath("/employee/dashboard");
   revalidatePath(`/employee/session/${sessionId}`);
-  redirect("/employee/dashboard");
+  // No `redirect()` here — this session may have been closed from the desktop
+  // split-view, where jumping to `/employee/dashboard` would tear down the
+  // whole persistent layout. The caller decides where to go next (typically
+  // back to whichever table it was working before this one) once it sees
+  // this return as success.
+  return null;
 }
 
 // ─── Customer PIN Management (Super Admin) ────────────────────────────────────
@@ -1658,7 +1670,12 @@ export async function forceCloseSession(sessionId: string): Promise<ActionResult
   if (error) return { error: "Failed to close the session." };
 
   revalidatePath("/employee/dashboard");
-  redirect("/employee/dashboard");
+  revalidatePath(`/employee/session/${sessionId}`);
+  // No `redirect()` — same reasoning as `closeSessionWithPayment` above: the
+  // caller navigates once it sees this as a success (or, on desktop, calls
+  // `router.refresh()` to reload THIS path in place — this revalidate is
+  // what makes that refresh actually pick up the new "closed" status).
+  return null;
 }
 
 // ─── Cancel an order / a single item ─────────────────────────────────────────
@@ -2038,6 +2055,10 @@ export async function getMyOrderQueue(): Promise<QueueOrder[]> {
 
 export type SalesTxn = {
   id: string;
+  /** The session this bill closed — lets a caller land on Sales pointed at
+   *  the ONE row that was just created (see `?session=` in the dashboard),
+   *  rather than just the general "today" list. */
+  session_id: string;
   /** The FULL value of the bill — including anything that went on credit. Already NET of
    *  `discount`: the discounted figure IS the sale everywhere in the system. */
   amount: number;
@@ -2183,7 +2204,7 @@ export async function getSalesReport(params?: {
       // sessions.room_stay_id rides along too, so a room bill settled by a deposit can
       // look up how that deposit was tendered — see advanceStayCash below.
       .select(
-        "id, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, advance_amount, payment_method, created_at, sessions ( type, table_id, room_id, customer_name, room_stay_id, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), room_stays ( room_id ), credits ( id, credit_number, customer_name, down_payment )"
+        "id, session_id, amount, total_amount, discount_amount, cash_amount, online_amount, card_amount, advance_amount, payment_method, created_at, sessions ( type, table_id, room_id, customer_name, room_stay_id, restaurant_tables ( number ), rooms ( number ), credit_customers ( name ) ), room_stays ( room_id ), credits ( id, credit_number, customer_name, down_payment )"
       )
       .eq("restaurant_id", ru.restaurant_id)
       .order("created_at", { ascending: false }),
@@ -2362,6 +2383,7 @@ export async function getSalesReport(params?: {
 
     return {
       id: p.id,
+      session_id: p.session_id,
       amount: value,
       discount: Number(p.discount_amount ?? 0),
       method: p.payment_method,
