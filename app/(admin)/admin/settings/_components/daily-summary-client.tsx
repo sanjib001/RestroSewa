@@ -1,16 +1,18 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import {
   updateDailySummarySettings,
   retryReportDelivery,
+  getReportHistory,
   type ActionResult,
   type ReportDeliveryRow,
 } from "@/app/actions/settings";
 import type { DailySummaryConfig } from "@/lib/reports/daily-summary";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PeriodFilter } from "@/components/ui/period-filter";
+import type { HistoryPeriod } from "@/lib/history-period";
 import { Mail, CheckCircle2, History, RefreshCw, AlertTriangle } from "lucide-react";
 
 const SLOTS = 3;
@@ -117,11 +119,28 @@ function RecipientsForm({ config }: { config: DailySummaryConfig }) {
 
 // ── Delivery history + retry ──────────────────────────────────────────────────
 
-function HistoryCard({ history }: { history: ReportDeliveryRow[] }) {
-  const router = useRouter();
+function HistoryCard({ history: initialHistory }: { history: ReportDeliveryRow[] }) {
+  // Defaults to "This Week" — the server sent that same default, so the first
+  // render needs no fetch.
+  const [period, setPeriod] = useState<HistoryPeriod>("week");
+  const [date, setDate] = useState("");
+  const [history, setHistory] = useState(initialHistory);
   const [retrying, setRetrying] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, startLoad] = useTransition();
   const [, startRetry] = useTransition();
+
+  // One effect over BOTH filters, not a fetch inside each handler — picking a day
+  // clears the period pill and picking a pill clears the day in the same click,
+  // and fetching from within each handler would race two requests against each
+  // other over which one's stale closure wins. Effect deps observe both after
+  // React has settled on their final values for that render.
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return; }
+    startLoad(async () => setHistory(await getReportHistory(period, date || null)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, date]);
 
   const retry = (day: string) => {
     setError(null);
@@ -130,7 +149,9 @@ function HistoryCard({ history }: { history: ReportDeliveryRow[] }) {
       try {
         const res = await retryReportDelivery(day);
         if (res && "error" in res && res.error) setError(`${prettyDay(day)}: ${res.error}`);
-        else router.refresh();
+        // Re-fetch this same list rather than a full page refresh — a retry
+        // only ever changes rows already in view.
+        else setHistory(await getReportHistory(period, date || null));
       } catch {
         // A thrown (not returned) error here is almost always a stale Server
         // Action reference from a deploy that happened while this tab was open —
@@ -146,9 +167,12 @@ function HistoryCard({ history }: { history: ReportDeliveryRow[] }) {
 
   return (
     <div className={CARD} style={cardStyle}>
-      <p className="text-sm font-medium mb-1 flex items-center gap-2" style={{ color: "var(--color-ink)" }}>
-        <History size={15} /> Report history
-      </p>
+      <div className="flex items-start justify-between gap-3 mb-1 flex-wrap">
+        <p className="text-sm font-medium flex items-center gap-2" style={{ color: "var(--color-ink)" }}>
+          <History size={15} /> Report history
+        </p>
+        <PeriodFilter value={period} onChange={setPeriod} date={date} onDateChange={setDate} />
+      </div>
       <p className="text-xs mb-4" style={{ color: "var(--color-ink-mute)" }}>
         The last daily reports we generated and sent. Failed ones can be retried — the PDF is
         rebuilt from live data and re-sent.
@@ -160,13 +184,17 @@ function HistoryCard({ history }: { history: ReportDeliveryRow[] }) {
         </p>
       )}
 
-      {history.length === 0 ? (
+      {loading ? (
+        <p className="text-sm py-3" style={{ color: "var(--color-ink-mute)" }}>Loading…</p>
+      ) : history.length === 0 ? (
         <div
           className="rounded-lg border px-4 py-6 text-center"
           style={{ borderStyle: "dashed", borderColor: "var(--color-hairline)" }}
         >
           <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
-            No reports yet. The first one sends after your next business day closes.
+            {period === "all"
+              ? "No reports yet. The first one sends after your next business day closes."
+              : "No reports in this period."}
           </p>
         </div>
       ) : (

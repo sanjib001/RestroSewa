@@ -33,10 +33,10 @@ export function PinSection({ sessions }: { sessions: ActiveSessionPin[] }) {
         {sessions.map((s) => (
           <div
             key={s.id}
-            className="flex items-center gap-4 px-4 py-3 rounded-lg border"
+            className="flex items-center gap-4 px-4 py-3 rounded-lg border flex-wrap"
             style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
           >
-            <div className="flex-1">
+            <div className="flex-1 min-w-0">
               <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
                 {s.table_number ? `Table ${s.table_number}` : s.type === "walk_in" ? "Walk-in" : "—"}
               </p>

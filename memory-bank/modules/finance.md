@@ -14,7 +14,9 @@ module covers the on-screen Finance report and the emailed daily report.
 - **Finance report** (`/admin/finance`) — `finance_report(restaurant, from, to)` derives opening,
   sales split, purchases, vendor+customer credit, salaries, and closing. CSV export mirrors it.
 - **Opening balance seed** (`finance_openings`) — the one non-derivable number; every later day's
-  opening carries forward.
+  opening carries forward. **Security PIN-gated** (`set_opening_balance`, 2026-08-26) — setting or
+  changing it rewrites every later balance, so it goes through the same reusable authorization
+  service as the other sensitive edits. See `modules/security-pin.md`.
 - **Business closing time** — periods anchor on the per-restaurant closing hour (see
   `modules/settings.md`, `lib/business-day.ts`).
 - **Daily Finance Report** — automatic per-business-day PDF from `lib/reports/*`, emailed via

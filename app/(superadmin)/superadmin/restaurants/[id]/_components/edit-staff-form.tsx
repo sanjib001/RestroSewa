@@ -105,11 +105,11 @@ export function EditStaffForm({
       className="mt-1 mb-2 rounded-xl border px-5 py-5 flex flex-col gap-4"
       style={{ background: "var(--color-canvas-soft)", borderColor: "var(--color-primary)", borderWidth: 1.5 }}
     >
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium min-w-0 truncate" style={{ color: "var(--color-ink)" }}>
           Edit {staff.display_name}
         </p>
-        <button type="button" onClick={onClose} style={{ color: "var(--color-ink-mute)" }}>
+        <button type="button" onClick={onClose} style={{ color: "var(--color-ink-mute)" }} className="shrink-0">
           <X size={14} />
         </button>
       </div>

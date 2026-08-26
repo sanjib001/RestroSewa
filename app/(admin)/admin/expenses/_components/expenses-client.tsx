@@ -10,7 +10,7 @@
 // Periods resolve server-side through the same `periodBounds` the Finance report
 // uses, so "This Month" here and "This Month" there always cover the same hours.
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import {
   addExtraExpense,
   addSaving,
@@ -29,6 +29,8 @@ import { SPENDING_CATEGORIES, EXPENSE_CATEGORY_LABEL } from "@/lib/expenses";
 import type { ExpenseCategory, ExtraExpense, SavingTitle } from "@/lib/expenses";
 import { PERIOD_LABEL } from "@/lib/finance";
 import type { FinancePeriod } from "@/lib/finance";
+import type { HistoryPeriod } from "@/lib/history-period";
+import { PeriodFilter } from "@/components/ui/period-filter";
 import { Button } from "@/components/ui/button";
 import { Modal } from "../../_components/modal";
 import {
@@ -561,7 +563,7 @@ function NewTitleForm({ onDone }: { onDone: () => void }) {
 
 function SavingPot({
   title,
-  entries,
+  refreshVersion,
   canManage,
   canEdit,
   securityEnabled,
@@ -569,7 +571,10 @@ function SavingPot({
   onChanged,
 }: {
   title: SavingTitle;
-  entries: ExtraExpense[];
+  /** Bumped by the parent after any add/withdraw/edit — refetches this pot's
+   *  history if it's open. Not the pot's own doing (it has no visibility into
+   *  another pot's edits), which is why it's a prop rather than local state. */
+  refreshVersion: number;
   canManage: boolean;
   canEdit: boolean;
   securityEnabled: boolean;
@@ -581,6 +586,26 @@ function SavingPot({
   const [name, setName] = useState(title.name);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  // This pot's OWN history filter — separate from every other pot's, and from
+  // the pot's all-time BALANCE above (`title.total`), which never moves with it.
+  const [period, setPeriod] = useState<HistoryPeriod>("month");
+  const [date, setDate] = useState("");
+  const [entries, setEntries] = useState<ExtraExpense[]>([]);
+  const [entriesLoading, setEntriesLoading] = useState(false);
+
+  // Fetched lazily, on first expand — a restaurant can have several pots, and
+  // fetching every one's history up front only to show a handful expanded is
+  // wasted work the collapsed ones will never use.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setEntriesLoading(true);
+    listSavings(title.id, title.todayOnly ? "today" : period, title.todayOnly ? null : date || null)
+      .then((rows) => { if (!cancelled) setEntries(rows); })
+      .finally(() => { if (!cancelled) setEntriesLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, period, date, title.id, title.todayOnly, refreshVersion]);
 
   function rename() {
     setError(null);
@@ -711,9 +736,23 @@ function SavingPot({
 
       {open && (
         <div className="pb-2">
-          {entries.length === 0 ? (
+          {/* This pot's OWN filter — not the add-only view, which has no period
+              concept at all (see `title.todayOnly` above). */}
+          {!title.todayOnly && (
+            <div className="px-4 pb-2 pl-11">
+              <PeriodFilter value={period} onChange={setPeriod} date={date} onDateChange={setDate} />
+            </div>
+          )}
+
+          {entriesLoading ? (
             <p className="text-xs px-4 pb-2 pl-11" style={{ color: "var(--color-ink-mute)" }}>
-              No money has been filed into this saving yet.
+              Loading…
+            </p>
+          ) : entries.length === 0 ? (
+            <p className="text-xs px-4 pb-2 pl-11" style={{ color: "var(--color-ink-mute)" }}>
+              {period === "all" && !date
+                ? "No money has been filed into this saving yet."
+                : "Nothing in this period."}
             </p>
           ) : (
             entries.map((e) => (
@@ -1023,7 +1062,6 @@ function EditExpenseForm({
 export function ExpensesClient({
   initialExpenses,
   initialTitles,
-  initialSavings,
   canManage,
   canEdit,
   securityEnabled,
@@ -1032,7 +1070,6 @@ export function ExpensesClient({
 }: {
   initialExpenses: ExtraExpense[];
   initialTitles: SavingTitle[];
-  initialSavings: ExtraExpense[];
   canManage: boolean;
   canEdit: boolean;
   securityEnabled: boolean;
@@ -1054,40 +1091,44 @@ export function ExpensesClient({
   const [tab, setTab] = useState<"expenses" | "saving">("expenses");
   const [expenses, setExpenses] = useState(initialExpenses);
   const [titles, setTitles] = useState(initialTitles);
-  const [savings, setSavings] = useState(initialSavings);
   const [period, setPeriod] = useState<FinancePeriod>(todayOnly ? "today" : "month");
+  const [date, setDate] = useState("");
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [addingSaving, setAddingSaving] = useState(false);
   const [addingTitle, setAddingTitle] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const [editing, setEditing] = useState<ExtraExpense | null>(null);
+  // Bumped after any add/withdraw/edit so every OPEN pot refetches its own
+  // history — each pot owns its own filter now, so there is no single "the
+  // savings list" to refresh from here.
+  const [savingsVersion, setSavingsVersion] = useState(0);
 
-  const load = useCallback(async (p: FinancePeriod) => {
+  // A picked calendar day rides on the EXISTING "custom" period — `periodBounds`
+  // already resolves `custom` with `from === to` to exactly one business day, so
+  // this needed no new plumbing, just `from`/`to` both set to the same date.
+  const load = useCallback(async (p: FinancePeriod, d: string) => {
     setLoading(true);
     try {
-      setExpenses(await listExtraExpenses({ period: p }));
+      setExpenses(
+        d ? await listExtraExpenses({ period: "custom", from: d, to: d }) : await listExtraExpenses({ period: p })
+      );
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const loadSavings = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [t, s] = await Promise.all([listSavingTitles(), listSavings()]);
-      setTitles(t);
-      setSavings(s);
-    } finally {
-      setLoading(false);
-    }
+  const loadTitles = useCallback(async () => {
+    setTitles(await listSavingTitles());
   }, []);
 
+  const firstRender = useRef(true);
   useEffect(() => {
     if (todayOnly) return; // the period is fixed; the server sent today already
-    if (period === "month") return; // the server already sent this one
-    load(period);
-  }, [period, load, todayOnly]);
+    if (firstRender.current) { firstRender.current = false; return; } // the server already sent this one
+    load(period, date);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, date, todayOnly]);
 
   const total = expenses.reduce((s, e) => s + e.amount, 0);
   const cash = expenses.reduce((s, e) => s + e.cash, 0);
@@ -1108,8 +1149,10 @@ export function ExpensesClient({
     setWithdrawing(false);
     setEditing(null);
     // Both lists move together: a saving is an expense row, so an edit can change
-    // either view's totals.
-    await Promise.all([load(period), loadSavings()]);
+    // either view's totals. Pot histories aren't fetched here (each pot owns its
+    // own) — bumping the version tells every open one to refetch itself.
+    await Promise.all([load(period, date), loadTitles()]);
+    setSavingsVersion((v) => v + 1);
   }
 
   return (
@@ -1197,21 +1240,37 @@ export function ExpensesClient({
         </p>
       )}
       {!showSaving && !todayOnly && (
-        <div className="flex gap-2 overflow-x-auto my-4" style={{ scrollbarWidth: "none" }}>
-          {PERIODS.map((p) => (
-            <button
-              key={p}
-              onClick={() => setPeriod(p)}
-              className="text-sm px-3 py-1.5 rounded-full border whitespace-nowrap transition-colors"
-              style={{
-                borderColor: period === p ? "var(--color-primary)" : "var(--color-hairline)",
-                background: period === p ? "var(--color-primary)" : "var(--color-canvas)",
-                color: period === p ? "#fff" : "var(--color-ink)",
-              }}
-            >
-              {PERIOD_LABEL[p]}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2 my-4">
+          <div className="flex gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+            {PERIODS.map((p) => (
+              <button
+                key={p}
+                onClick={() => { setDate(""); setPeriod(p); }}
+                className="text-sm px-3 py-1.5 rounded-full border whitespace-nowrap transition-colors"
+                style={{
+                  borderColor: !date && period === p ? "var(--color-primary)" : "var(--color-hairline)",
+                  background: !date && period === p ? "var(--color-primary)" : "var(--color-canvas)",
+                  color: !date && period === p ? "#fff" : "var(--color-ink)",
+                }}
+              >
+                {PERIOD_LABEL[p]}
+              </button>
+            ))}
+          </div>
+          {/* A specific calendar day — not a sixth period, a separate choice
+              that overrides whichever pill is picked (see `load` above). */}
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            aria-label="Choose a specific day"
+            className="shrink-0 text-sm rounded-full border px-3 py-1.5"
+            style={{
+              borderColor: date ? "var(--color-primary)" : "var(--color-hairline)",
+              background: "var(--color-canvas)",
+              color: "var(--color-ink)",
+            }}
+          />
         </div>
       )}
       {showSaving && <div className="h-4" />}
@@ -1282,7 +1341,7 @@ export function ExpensesClient({
               <SavingPot
                 key={t.id}
                 title={t}
-                entries={savings.filter((s) => s.savingTitleId === t.id)}
+                refreshVersion={savingsVersion}
                 canManage={canManage}
                 canEdit={canEdit}
                 securityEnabled={securityEnabled}
@@ -1299,7 +1358,7 @@ export function ExpensesClient({
         >
           <Receipt size={22} className="mx-auto mb-2" style={{ color: "var(--color-ink-mute)", opacity: 0.5 }} />
           <p className="text-sm" style={{ color: "var(--color-ink-mute)" }}>
-            No expenses recorded for {PERIOD_LABEL[period].toLowerCase()}.
+            No expenses recorded for {date ? "that day" : PERIOD_LABEL[period].toLowerCase()}.
           </p>
         </div>
       ) : (

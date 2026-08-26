@@ -9,6 +9,7 @@ import {
   useRef,
 } from "react";
 import { useRealtime } from "@/lib/realtime/use-realtime";
+import { useBodyScrollLock } from "@/lib/use-body-scroll-lock";
 import { RestaurantLogo } from "@/components/branding/restaurant-logo";
 import { FoodMark } from "@/components/ui/food-mark";
 import type { FoodType } from "@/lib/food-types";
@@ -245,16 +246,13 @@ function Sheet({
   maxWidth?: number;
   label?: string;
 }) {
+  useBodyScrollLock(open);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
-    };
+    return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
   if (!open) return null;

@@ -886,7 +886,7 @@ export async function getLinkTargets(): Promise<LinkTarget[]> {
   if (!STOCK_ACCESS.canViewStock(ru)) return [];
 
   const service = createServiceClient();
-  const [menuRes, varRes] = await Promise.all([
+  const [menuRes, varRes, fallbackRes] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (service as any)
       .from("menu_items")
@@ -900,18 +900,42 @@ export async function getLinkTargets(): Promise<LinkTarget[]> {
       .select("id, menu_item_id, name, sort_order, menu_items!inner(restaurant_id)")
       .eq("menu_items.restaurant_id", ru.restaurant_id)
       .order("sort_order"),
+    // Items that already have a recipe line attached directly to the item
+    // (variant_id null) — pre-dating this rule, some restaurants use that as a
+    // shared fallback every variant without its own recipe inherits. Existing
+    // uses of that pattern must stay editable even though new ones are no
+    // longer offered.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (service as any)
+      .from("menu_item_products")
+      .select("menu_item_id")
+      .eq("restaurant_id", ru.restaurant_id)
+      .is("variant_id", null),
   ]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const variants = (varRes.data ?? []) as any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const itemsWithFallback = new Set(((fallbackRes.data ?? []) as any[]).map((l) => l.menu_item_id));
   const targets: LinkTarget[] = [];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const m of ((menuRes.data ?? []) as any[])) {
-    // The item itself first — it is the fallback recipe every variant inherits
-    // unless it is given one of its own.
-    targets.push({ menu_item_id: m.id, variant_id: null, label: m.name });
-    for (const v of variants.filter((x) => x.menu_item_id === m.id)) {
+    const itemVariants = variants.filter((x) => x.menu_item_id === m.id);
+    if (itemVariants.length === 0 || itemsWithFallback.has(m.id)) {
+      // No variants — the item itself IS the target. Or it already has an
+      // item-level fallback recipe from before this rule — keep it editable
+      // (add another product, or re-add one just unlinked) rather than
+      // stranding it with no way back into the picker.
+      targets.push({ menu_item_id: m.id, variant_id: null, label: m.name });
+    }
+    if (itemVariants.length === 0) continue;
+    // Variants exist — list them too. A NEW item without an existing fallback
+    // only offers its variants: the bare item name would otherwise sit in the
+    // picker alongside them, and a sale is always rung up against a variant,
+    // never the item directly, so it is never the thing an admin means to pick
+    // here.
+    for (const v of itemVariants) {
       targets.push({
         menu_item_id: m.id,
         variant_id: v.id,

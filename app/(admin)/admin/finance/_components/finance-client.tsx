@@ -113,7 +113,11 @@ function Section({
           style={{ borderTop: i === 0 || r.sub ? "none" : "1px solid var(--color-hairline)" }}
         >
           <span
-            className={r.sub ? "text-xs pl-4" : "text-sm"}
+            // min-w-0 is load-bearing: a flex child holding text defaults to
+            // min-width:auto, so on a narrow phone a long hint (e.g. "Paid by
+            // advance — cash") pushes the row wider than the card instead of
+            // wrapping — silently clipped by the section's own overflow-hidden.
+            className={(r.sub ? "text-xs pl-4" : "text-sm") + " min-w-0"}
             style={{ color: "var(--color-ink-mute)", opacity: r.sub ? 0.8 : 1 }}
           >
             {r.label}
@@ -350,20 +354,36 @@ function LedgerSection({
 // ── Opening balance ───────────────────────────────────────────────────────────
 
 function OpeningForm({ current, onDone }: { current: OpeningBalance; onDone: () => void }) {
-  const [state, action, pending] = useActionState<ActionResult, FormData>(setOpeningBalance, null);
-
-  const wasPending = useRef(false);
-  useEffect(() => {
-    if (wasPending.current && !pending && !state?.error) onDone();
-    wasPending.current = pending;
-  }, [pending, state, onDone]);
-
   const defaultDate = current
     ? new Date(current.effective_from).toISOString().slice(0, 10)
     : new Date().toISOString().slice(0, 10);
 
+  const [cash, setCash] = useState(current?.cash != null ? String(current.cash) : "");
+  const [online, setOnline] = useState(current?.online != null ? String(current.online) : "");
+  const [date, setDate] = useState(defaultDate);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+
+  const cashNum = cash === "" ? 0 : parseFloat(cash);
+  const onlineNum = online === "" ? 0 : parseFloat(online);
+
+  const validate = () => {
+    if (isNaN(cashNum) || cashNum < 0) return "Cash on hand must be zero or more.";
+    if (isNaN(onlineNum) || onlineNum < 0) return "Bank balance must be zero or more.";
+    if (!date) return "Choose the date your books start from.";
+    return null;
+  };
+
   return (
-    <form action={action} className="flex flex-col gap-3">
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        const err = validate();
+        setFormError(err);
+        if (!err) setConfirming(true);
+      }}
+      className="flex flex-col gap-3"
+    >
       <p className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
         The money you had before the system started tracking it. Set this once — every day
         after it carries forward automatically, so you never type a balance again.
@@ -374,13 +394,13 @@ function OpeningForm({ current, onDone }: { current: OpeningBalance; onDone: () 
           <label htmlFor="f_cash" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
             Cash in hand (₹)
           </label>
-          <Input id="f_cash" name="cash" type="number" min="0" step="0.01" placeholder="0.00" defaultValue={current?.cash ?? ""} />
+          <Input id="f_cash" type="number" min="0" step="0.01" placeholder="0.00" value={cash} onChange={(e) => setCash(e.target.value)} />
         </div>
         <div className="flex flex-col gap-1.5">
           <label htmlFor="f_online" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
             Bank / online (₹)
           </label>
-          <Input id="f_online" name="online" type="number" min="0" step="0.01" placeholder="0.00" defaultValue={current?.online ?? ""} />
+          <Input id="f_online" type="number" min="0" step="0.01" placeholder="0.00" value={online} onChange={(e) => setOnline(e.target.value)} />
         </div>
       </div>
 
@@ -390,10 +410,10 @@ function OpeningForm({ current, onDone }: { current: OpeningBalance; onDone: () 
         </label>
         <input
           id="f_date"
-          name="effective_from"
           type="date"
           required
-          defaultValue={defaultDate}
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
           className="w-full text-sm rounded-lg border px-3 py-2"
           style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline-input)", color: "var(--color-ink)" }}
         />
@@ -416,15 +436,28 @@ function OpeningForm({ current, onDone }: { current: OpeningBalance; onDone: () 
         </div>
       )}
 
-      {state?.error && (
+      {formError && (
         <p className="text-sm rounded-md px-3 py-2" style={{ color: "var(--color-ruby)", background: "var(--color-danger-bg)" }}>
-          {state.error}
+          {formError}
         </p>
       )}
 
-      <Button type="submit" variant="primary" disabled={pending}>
-        {pending ? "Saving…" : current ? "Update opening balance" : "Set opening balance"}
+      <Button type="submit" variant="primary">
+        {current ? "Update opening balance" : "Set opening balance"}
       </Button>
+
+      <SecurityPinDialog
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        onSuccess={() => {
+          setConfirming(false);
+          onDone();
+        }}
+        title={current ? "Update opening balance" : "Set opening balance"}
+        description="Every later day's balance is carried forward from this figure — confirm with your Security PIN."
+        confirmLabel={current ? "Update" : "Set"}
+        onConfirm={(pin) => setOpeningBalance(pin, { cash: cashNum, online: onlineNum, effective_from: date })}
+      />
     </form>
   );
 }
@@ -874,7 +907,7 @@ export function FinanceClient({
             {loading && <span className="ml-2">Updating…</span>}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {canManage && (
             <Button variant="secondary" size="sm" onClick={() => setSettingOpening(true)}>
               <Settings2 size={14} /> Opening balance

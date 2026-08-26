@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { getRestaurantWithStaff, toggleRestaurantStatus } from "@/app/actions/restaurants";
+import { getRestaurantWithStaff, toggleRestaurantStatus, updateSubscriptionDates } from "@/app/actions/restaurants";
 import type { RestaurantRow, StaffRow } from "@/app/actions/restaurants";
 import { resetStaffPin } from "@/app/actions/staff";
+import { subscriptionDaysRemaining, subscriptionExpiryDate, SUBSCRIPTION_CYCLE_DAYS } from "@/lib/subscription";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, KeyRound, Power, PowerOff, ShieldCheck, X, Check } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { ExternalLink, KeyRound, Power, PowerOff, ShieldCheck, X, Check, CalendarClock } from "lucide-react";
 import { DangerZone } from "./danger-zone";
 
 const PIN_LENGTH = 4;
@@ -113,7 +115,7 @@ function StaffPinRow({ s }: { s: StaffRow }) {
       className="rounded-lg border"
       style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)", opacity: s.is_active ? 1 : 0.6 }}
     >
-      <div className="flex items-center gap-3 px-4 py-3">
+      <div className="flex items-center gap-3 px-4 py-3 flex-wrap">
         <div
           className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium shrink-0"
           style={{ background: "var(--color-canvas-soft)", color: "var(--color-ink-mute)" }}
@@ -196,7 +198,17 @@ function StaffPinRow({ s }: { s: StaffRow }) {
 
 // ─── Main client ─────────────────────────────────────────────────────────────
 
-type Detail = { restaurant: { id: string; name: string; slug: string; is_active: boolean }; staff: StaffRow[] };
+type Detail = {
+  restaurant: {
+    id: string;
+    name: string;
+    slug: string;
+    is_active: boolean;
+    install_date: string | null;
+    subscription_extra_days: number;
+  };
+  staff: StaffRow[];
+};
 
 export function SettingsClient({ restaurants }: { restaurants: RestaurantRow[] }) {
   const [selectedId, setSelectedId] = useState("");
@@ -207,11 +219,21 @@ export function SettingsClient({ restaurants }: { restaurants: RestaurantRow[] }
   // server to revalidate would leave a name in the list that resolves to nothing.
   const [deleted, setDeleted] = useState<string[]>([]);
 
+  // Subscription card's own working values — set from `detail` whenever a
+  // restaurant is (re)selected, edited locally until Save.
+  const [subDate, setSubDate] = useState("");
+  const [subExtra, setSubExtra] = useState("0");
+  const [subPending, startSub] = useTransition();
+  const [subError, setSubError] = useState<string | null>(null);
+  const [subSaved, setSubSaved] = useState(false);
+
   const options = restaurants.filter((r) => !deleted.includes(r.id));
 
   function selectRestaurant(id: string) {
     setSelectedId(id);
     setDetail(null);
+    setSubError(null);
+    setSubSaved(false);
     if (!id) return;
     startLoad(async () => {
       const d = await getRestaurantWithStaff(id);
@@ -222,9 +244,13 @@ export function SettingsClient({ restaurants }: { restaurants: RestaurantRow[] }
             name: d.restaurant.name,
             slug: d.restaurant.slug,
             is_active: d.restaurant.is_active,
+            install_date: d.restaurant.install_date,
+            subscription_extra_days: d.restaurant.subscription_extra_days,
           },
           staff: d.staff,
         });
+        setSubDate(d.restaurant.install_date ? d.restaurant.install_date.slice(0, 10) : "");
+        setSubExtra(String(d.restaurant.subscription_extra_days ?? 0));
       }
     });
   }
@@ -240,8 +266,45 @@ export function SettingsClient({ restaurants }: { restaurants: RestaurantRow[] }
     });
   }
 
+  function saveSubscription() {
+    if (!detail) return;
+    setSubError(null);
+    setSubSaved(false);
+    const extraDays = parseInt(subExtra, 10) || 0;
+    startSub(async () => {
+      const res = await updateSubscriptionDates(detail.restaurant.id, subDate, extraDays);
+      if (res && "error" in res) {
+        setSubError(res.error);
+        return;
+      }
+      const remaining = subscriptionDaysRemaining(subDate, extraDays);
+      setDetail((prev) =>
+        prev
+          ? {
+              ...prev,
+              restaurant: {
+                ...prev.restaurant,
+                install_date: subDate,
+                subscription_extra_days: extraDays,
+                // Mirrors the server: only ever flips ON here, never off.
+                is_active: remaining !== null && remaining > 0 ? true : prev.restaurant.is_active,
+              },
+            }
+          : prev
+      );
+      setSubSaved(true);
+      setTimeout(() => setSubSaved(false), 4000);
+    });
+  }
+
   const admins = detail?.staff.filter((s) => s.role === "restaurant_admin") ?? [];
   const employees = detail?.staff.filter((s) => s.role === "restaurant_employee") ?? [];
+
+  // Recomputed on every keystroke, before Save is even clicked — the superadmin
+  // sees exactly what they're about to commit to.
+  const subExtraNum = parseInt(subExtra, 10) || 0;
+  const subExpiry = subscriptionExpiryDate(subDate || null, subExtraNum);
+  const subRemaining = subscriptionDaysRemaining(subDate || null, subExtraNum);
 
   return (
     <div className="flex flex-col gap-6">
@@ -282,7 +345,7 @@ export function SettingsClient({ restaurants }: { restaurants: RestaurantRow[] }
             className="rounded-xl border px-5 py-4"
             style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
           >
-            <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
               <p className="text-sm font-medium" style={{ color: "var(--color-ink)" }}>
                 Restaurant account
               </p>
@@ -299,14 +362,14 @@ export function SettingsClient({ restaurants }: { restaurants: RestaurantRow[] }
             </p>
 
             <div
-              className="flex items-center gap-3 rounded-lg border px-4 py-3"
+              className="flex items-center gap-3 rounded-lg border px-4 py-3 flex-wrap"
               style={{ borderColor: "var(--color-hairline)", background: "var(--color-canvas-soft)" }}
             >
               <div
                 className="w-2 h-2 rounded-full shrink-0"
                 style={{ background: detail.restaurant.is_active ? "#1a7a4a" : "#d1d5db" }}
               />
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <p className="text-sm" style={{ color: "var(--color-ink)" }}>
                   {detail.restaurant.is_active ? "Active" : "Inactive"}
                 </p>
@@ -320,7 +383,7 @@ export function SettingsClient({ restaurants }: { restaurants: RestaurantRow[] }
                 type="button"
                 onClick={toggleActive}
                 disabled={statusPending}
-                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border"
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border shrink-0"
                 style={{
                   color: detail.restaurant.is_active ? "#b45309" : "#1a7a4a",
                   borderColor: (detail.restaurant.is_active ? "#b45309" : "#1a7a4a") + "55",
@@ -330,6 +393,87 @@ export function SettingsClient({ restaurants }: { restaurants: RestaurantRow[] }
                 {detail.restaurant.is_active ? <PowerOff size={13} /> : <Power size={13} />}
                 {statusPending ? "Saving…" : detail.restaurant.is_active ? "Deactivate" : "Activate"}
               </button>
+            </div>
+          </div>
+
+          {/* Subscription */}
+          <div
+            className="rounded-xl border px-5 py-4"
+            style={{ background: "var(--color-canvas)", borderColor: "var(--color-hairline)" }}
+          >
+            <p className="text-sm font-medium mb-1 flex items-center gap-2" style={{ color: "var(--color-ink)" }}>
+              <CalendarClock size={15} /> Subscription
+            </p>
+            <p className="text-xs mb-4" style={{ color: "var(--color-ink-mute)" }}>
+              Install date starts a {SUBSCRIPTION_CYCLE_DAYS}-day cycle. Additional days extend it — both editable any time.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="sub_install_date" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
+                  Install date
+                </label>
+                <input
+                  id="sub_install_date"
+                  type="date"
+                  value={subDate}
+                  onChange={(e) => { setSubDate(e.target.value); setSubSaved(false); }}
+                  className="h-9 rounded-sm border px-3 text-sm"
+                  style={{ borderColor: "var(--color-hairline-input)", color: "var(--color-ink)", background: "var(--color-canvas)" }}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="sub_extra_days" className="text-xs uppercase tracking-wide" style={{ color: "var(--color-ink-mute)", letterSpacing: "0.06em" }}>
+                  Additional days
+                </label>
+                <Input
+                  id="sub_extra_days"
+                  type="number"
+                  min="0"
+                  max="3650"
+                  value={subExtra}
+                  onChange={(e) => { setSubExtra(e.target.value); setSubSaved(false); }}
+                />
+              </div>
+            </div>
+
+            {subDate && (
+              <div
+                className="rounded-lg border px-3 py-2.5 mb-3 flex items-center justify-between gap-3 flex-wrap"
+                style={{ background: "var(--color-canvas-soft)", borderColor: "var(--color-hairline)" }}
+              >
+                <span className="text-xs" style={{ color: "var(--color-ink-mute)" }}>
+                  {SUBSCRIPTION_CYCLE_DAYS}-day cycle{subExtraNum > 0 ? ` + ${subExtraNum} bonus` : ""} → expires{" "}
+                  {subExpiry?.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                </span>
+                <span
+                  className="text-sm font-medium tabular-nums"
+                  style={{ color: subRemaining !== null && subRemaining < 30 ? "var(--color-ruby)" : "var(--color-ink)" }}
+                >
+                  {subRemaining === null ? "—" : subRemaining <= 0 ? "Expired" : `${subRemaining} days left`}
+                </span>
+              </div>
+            )}
+
+            {subError && (
+              <p className="text-sm mb-3" style={{ color: "var(--color-ruby)" }}>{subError}</p>
+            )}
+
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                disabled={subPending || !subDate}
+                onClick={saveSubscription}
+              >
+                {subPending ? "Saving…" : "Save subscription"}
+              </Button>
+              {subSaved && (
+                <span className="inline-flex items-center gap-1 text-xs" style={{ color: "#1a7a4a" }}>
+                  <Check size={13} /> Saved
+                </span>
+              )}
             </div>
           </div>
 

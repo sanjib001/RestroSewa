@@ -46,9 +46,24 @@ async function OrdersBody({ ru }: { ru: RestaurantUserContext }) {
   return <OrdersSection initialOrders={orders} canManage={NAV_ACCESS.canManageOrders(ru)} />;
 }
 
-async function SalesBody({ canEditTender }: { canEditTender: boolean }) {
+async function SalesBody({
+  canEditTender,
+  highlightSessionId,
+}: {
+  canEditTender: boolean;
+  /** Just-closed session to scroll to and highlight — see the page's own doc
+   *  comment on `?session=`. */
+  highlightSessionId: string | null;
+}) {
   const report = await getSalesReport({ period: "today" });
-  return <SalesView initial={report} embedded canEditTender={canEditTender} />;
+  return (
+    <SalesView
+      initial={report}
+      embedded
+      canEditTender={canEditTender}
+      highlightSessionId={highlightSessionId}
+    />
+  );
 }
 
 async function CreditsBody({ openId, canDiscount }: { openId: string | null; canDiscount: boolean }) {
@@ -86,16 +101,19 @@ async function MenuBody({ ru }: { ru: RestaurantUserContext }) {
 export default async function EmployeeDashboardPage({
   searchParams,
 }: {
-  // Two ways to arrive pointed at a particular part of the workspace:
+  // Three ways to arrive pointed at a particular part of the workspace:
   //   ?credit=<accountId>  — a bill was just closed on credit; open that account.
+  //   ?session=<sessionId> — a bill was just closed in full; scroll Sales to
+  //                          THAT bill specifically, so printing it is one tap
+  //                          away instead of a scan through today's list.
   //   ?focus=<section>     — a tapped push (or a redirected legacy /employee/* page)
   //                          asking the dashboard to scroll to a section. `focus`'s
   //                          `notifications` value is handled by the bell, not here.
-  // Both keep staff on the one page instead of bouncing them to a standalone route.
-  searchParams: Promise<{ credit?: string; focus?: string }>;
+  // All three keep staff on the one page instead of bouncing them to a standalone route.
+  searchParams: Promise<{ credit?: string; session?: string; focus?: string }>;
 }) {
   const { restaurantUser } = await requireRestaurantStaff();
-  const { credit: openCreditId, focus: focusParam } = await searchParams;
+  const { credit: openCreditId, session: highlightSessionId, focus: focusParam } = await searchParams;
   // Rooms only exist for a hotel / restaurant+hotel client.
   const config = await getRestaurantConfig(restaurantUser.restaurant_id);
   const roomsEnabled = hasRooms(config.businessType);
@@ -117,6 +135,8 @@ export default async function EmployeeDashboardPage({
   const SCROLLABLE: SectionKey[] = ["orders", "tables", "walkins", "rooms", "sales", "credits", "menu", "stock", "purchases", "vendors"];
   const focusSection: SectionKey | null = openCreditId
     ? "credits"
+    : highlightSessionId
+    ? "sales"
     : SCROLLABLE.includes(focusParam as SectionKey)
       ? (focusParam as SectionKey)
       : null;
@@ -193,7 +213,7 @@ export default async function EmployeeDashboardPage({
       subtitle: "Takings, breakdown & CSV export",
       body: (
         <Suspense fallback={<SectionSkeleton />}>
-          <SalesBody canEditTender={canEditTender} />
+          <SalesBody canEditTender={canEditTender} highlightSessionId={highlightSessionId ?? null} />
         </Suspense>
       ),
     });

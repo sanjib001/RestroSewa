@@ -6,6 +6,7 @@ import { STOCK_ACCESS } from "@/lib/permissions";
 import { getRestaurantUser } from "@/lib/auth/get-restaurant-user";
 import { periodBounds } from "@/lib/finance";
 import type { FinancePeriod } from "@/lib/finance";
+import { historyPeriodBounds, type HistoryPeriod } from "@/lib/history-period";
 import { resolveSplit } from "@/lib/payment-split";
 import { expenseCategoryLabel, isSpendingCategory } from "@/lib/expenses";
 import type { ExpenseCategory, ExtraExpense, SavingTitle } from "@/lib/expenses";
@@ -262,19 +263,45 @@ export async function listSavingTitles(): Promise<SavingTitle[]> {
   });
 }
 
-/** Every saving ever filed, newest first — the list that lives under each pot. */
-export async function listSavings(): Promise<ExtraExpense[]> {
+/**
+ * Every saving filed, newest first — the list that lives under ONE pot.
+ * `period` narrows it (default "month" — a pot's own BALANCE is never
+ * period-scoped, see `listSavingTitles`, but its transaction HISTORY is a
+ * different thing and can get long enough to want narrowing). The filter is
+ * per-pot, not a single control over every pot at once — hence `savingTitleId`
+ * is required, not optional: this always answers "this pot's history", never
+ * "every pot's, mixed together".
+ */
+export async function listSavings(
+  savingTitleId: string,
+  period: HistoryPeriod = "month",
+  date: string | null = null
+): Promise<ExtraExpense[]> {
   const ru = await getRestaurantUser();
   if (!STOCK_ACCESS.canViewExpenses(ru)) return [];
 
+  // Same rule as `listExtraExpenses`: the add-only holder sees TODAY and nothing
+  // else, forced HERE rather than by hiding the picker — a crafted call asking
+  // for "year" gets today regardless of what the client sent.
+  const todayOnly = STOCK_ACCESS.expensesTodayOnly(ru);
+  const effectivePeriod = todayOnly ? "today" : period;
+  const effectiveDate = todayOnly ? null : date;
+
   const service = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (service as any)
+  let query = (service as any)
     .from("extra_expenses")
     .select(SELECT)
     .eq("restaurant_id", ru.restaurant_id)
     .eq("category", "saving")
-    .order("created_at", { ascending: false });
+    .eq("saving_title_id", savingTitleId);
+
+  if (effectiveDate || effectivePeriod !== "all") {
+    const { from, to } = historyPeriodBounds(effectivePeriod, ru.closingHour, effectiveDate);
+    query = query.gte("created_at", from.toISOString()).lt("created_at", to.toISOString());
+  }
+
+  const { data } = await query.order("created_at", { ascending: false });
 
   return mapExpenses(data);
 }

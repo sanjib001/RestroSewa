@@ -10,6 +10,8 @@ import { buildVisibilityFilter } from "@/lib/assignments";
 import { createServiceClient } from "@/lib/supabase/service";
 import { SessionClient } from "./_components/session-client";
 import { TransferHistory } from "./_components/transfer-history";
+import { SessionSplitView } from "./_components/session-split-view";
+import { getAddItemsMenuData } from "@/lib/menu-browser-data";
 import type { RestaurantInfo } from "./_components/print-tickets";
 import { ChevronLeft } from "lucide-react";
 
@@ -91,6 +93,12 @@ export default async function SessionPage({
   // Everyone who can view the session can also see its ordering PIN.
   const canSeePIN = canView;
 
+  // Menu data for the desktop/tablet split-view's "Menu" tab — same fetch the
+  // standalone mobile `/add` route uses (`lib/menu-browser-data.ts`), so both
+  // surfaces always show the identical menu. Not fetched at all for a viewer
+  // who can't create orders — there would be no Menu tab to show it in.
+  const menuData = canCreateOrders ? await getAddItemsMenuData(restaurantUser) : null;
+
   const restaurant: RestaurantInfo = {
     name: config.name,
     address: config.address,
@@ -121,14 +129,23 @@ export default async function SessionPage({
       : "Session";
 
   return (
-    <div className="p-4 sm:p-5 max-w-lg mx-auto">
+    <SessionSplitView
+      sessionId={id}
+      canCreateOrders={canCreateOrders}
+      menuData={menuData}
+    >
+      {/* Solid brand-primary fill, not a soft pill — the soft tint (previous
+          version, and still what pills elsewhere use) reads as calm, passive
+          UI chrome. A back button gets tapped constantly on a busy floor and
+          needs to read as an actual button at a glance, so it gets the same
+          filled, high-contrast treatment as a primary action. */}
       <Link
         href="/employee/dashboard"
-        className="inline-flex items-center gap-1 text-sm mb-4"
-        style={{ color: "var(--color-ink-mute)" }}
+        className="inline-flex items-center gap-1 text-sm font-semibold mb-4 px-3 py-1.5 -ml-1 rounded-lg transition-colors hover:brightness-110 active:brightness-95"
+        style={{ color: "#fff", background: "var(--color-primary)" }}
       >
-        <ChevronLeft size={14} />
-        Tables
+        <ChevronLeft size={15} />
+        Back
       </Link>
 
       <div className="flex items-center justify-between mb-5">
@@ -167,6 +184,6 @@ export default async function SessionPage({
         canCancelOrders={canCancelOrders}
         discountEnabled={discountEnabled}
       />
-    </div>
+    </SessionSplitView>
   );
 }

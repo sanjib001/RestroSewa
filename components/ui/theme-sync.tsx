@@ -8,7 +8,12 @@ export function ThemeSync() {
 
   useEffect(() => {
     const root = document.documentElement;
-    const isDashboard = pathname.startsWith("/admin") || pathname.startsWith("/employee");
+    const isDashboard =
+      pathname.startsWith("/admin") ||
+      pathname.startsWith("/employee") ||
+      // Excludes /superadmin/login — that's (superadmin-auth), a different
+      // route group under the same URL prefix, and logins stay light below.
+      (pathname.startsWith("/superadmin") && !pathname.startsWith("/superadmin/login"));
     const isCustomer = pathname.startsWith("/c/");
 
     if (isDashboard) {

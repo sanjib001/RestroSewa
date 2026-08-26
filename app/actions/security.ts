@@ -11,6 +11,7 @@ import {
   getSecurityAuditRows,
   type SecurityAuditRow,
 } from "@/lib/security/authorize";
+import { historyPeriodBounds, type HistoryPeriod } from "@/lib/history-period";
 
 export type ActionResult = { error: string } | { ok: true } | null;
 
@@ -66,9 +67,20 @@ export async function updateSecurityPin(
   return { ok: true };
 }
 
-export async function getSecurityAuditLog(limit = 50): Promise<SecurityAuditRow[]> {
+export async function getSecurityAuditLog(
+  period: HistoryPeriod = "today",
+  date: string | null = null,
+  limit = 50
+): Promise<SecurityAuditRow[]> {
   const { restaurantUser } = await requireRestaurantAdmin();
-  return getSecurityAuditRows(restaurantUser.restaurant_id, limit);
+  const unbounded = !date && period === "all";
+  const { from, to } = historyPeriodBounds(period, restaurantUser.closingHour, date);
+  return getSecurityAuditRows(
+    restaurantUser.restaurant_id,
+    limit,
+    unbounded ? undefined : from,
+    unbounded ? undefined : to
+  );
 }
 
 // ─── Gated edits ──────────────────────────────────────────────────────────────

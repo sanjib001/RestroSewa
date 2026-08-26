@@ -52,7 +52,7 @@ const PERIOD_LABEL: Record<SalesPeriod, string> = {
   custom: "Custom Range",
 };
 
-// ── Date-bucketing for the transaction list (Today / Yesterday / Month Year) ──
+// ── Date-bucketing for the transaction list (Today / Yesterday / then… what?) ──
 //
 // Every date here arrives already decided by the SERVER: each row carries its
 // own `business_date`, and the report says which business date is "today". This
@@ -60,24 +60,62 @@ const PERIOD_LABEL: Record<SalesPeriod, string> = {
 // and re-derive the day from the browser's clock, so the grouping could disagree
 // with the totals sitting right above it (a device in another timezone, or any
 // restaurant whose business day ends after midnight).
-function bucketLabel(t: SalesTxn, today: string, yesterday: string): string {
+//
+// The bucket GRAIN below "Today"/"Yesterday" scales with how wide the selected
+// period is: a Week or Month view is only useful broken down by DAY (that used to
+// collapse everything past yesterday into one "August 2026" bucket, hiding which
+// day anything happened on); a Year view is only readable broken down by MONTH;
+// All Time / a long custom range is only readable broken down by YEAR. Getting
+// this from the period rather than eyeballing the data keeps it stable — the
+// grain doesn't jump around as bills load in.
+type DateGrain = "day" | "month" | "year";
+
+// A LOCAL day count, not `(msB - msA) / 86400000` — that divides UTC instants,
+// which is wrong the moment either date fell on a DST transition.
+function daysBetween(fromIso: string, toIso: string): number {
+  const [fy, fm, fd] = fromIso.split("-").map(Number);
+  const [ty, tm, td] = toIso.split("-").map(Number);
+  const a = new Date(fy, fm - 1, fd);
+  const b = new Date(ty, tm - 1, td);
+  return Math.round((b.getTime() - a.getTime()) / 86400000);
+}
+
+function grainFor(period: SalesPeriod, from: string | null, to: string | null): DateGrain {
+  if (period === "today" || period === "week" || period === "month") return "day";
+  if (period === "year") return "month";
+  if (period === "all") return "year";
+  // Custom range: no period name to go by, so size it off the actual span.
+  if (from && to) {
+    const span = daysBetween(from, to);
+    if (span <= 31) return "day";
+    if (span <= 366) return "month";
+    return "year";
+  }
+  return "day";
+}
+
+function bucketLabel(t: SalesTxn, today: string, yesterday: string, grain: DateGrain): string {
   if (t.business_date === today) return "Today";
   if (t.business_date === yesterday) return "Yesterday";
-  // Older than that, group by month — parsed as a LOCAL date, since
-  // `new Date("YYYY-MM-DD")` would be read as UTC and could name the wrong month.
+  // Parsed as a LOCAL date, since `new Date("YYYY-MM-DD")` would be read as UTC
+  // and could name the wrong day/month for a west-of-UTC business.
   const [y, m, d] = t.business_date.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  const date = new Date(y, m - 1, d);
+  if (grain === "day") return date.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+  if (grain === "month") return date.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  return String(y);
 }
 
 function groupByDate(
   txns: SalesTxn[],
   today: string,
-  yesterday: string
+  yesterday: string,
+  grain: DateGrain
 ): { label: string; items: SalesTxn[] }[] {
   const groups: { label: string; items: SalesTxn[] }[] = [];
   const index = new Map<string, { label: string; items: SalesTxn[] }>();
   for (const t of txns) {
-    const label = bucketLabel(t, today, yesterday);
+    const label = bucketLabel(t, today, yesterday, grain);
     let g = index.get(label);
     if (!g) {
       g = { label, items: [] };
@@ -128,10 +166,16 @@ function TxnCard({
   txn,
   canEditTender,
   onEdited,
+  highlighted = false,
 }: {
   txn: SalesTxn;
   canEditTender: boolean;
   onEdited: () => void;
+  /** This is the bill a table's session just closed with — see `SalesView`'s
+   *  `highlightSessionId`. Gets its own ring and an id to scroll to, so
+   *  landing here from "close & collect payment" points straight at the
+   *  receipt that needs printing instead of the general list. */
+  highlighted?: boolean;
 }) {
   const location = txn.table_number
     ? `Table ${txn.table_number}`
@@ -152,10 +196,13 @@ function TxnCard({
 
   return (
     <div
+      id={`sales-txn-${txn.id}`}
       className="rounded-xl border px-4 py-3 flex items-center gap-3"
       style={{
         background: "var(--color-canvas)",
-        borderColor: onCredit ? `${tone}44` : "var(--color-hairline)",
+        borderColor: highlighted ? "var(--color-primary)" : onCredit ? `${tone}44` : "var(--color-hairline)",
+        borderWidth: highlighted ? 1.5 : 1,
+        boxShadow: highlighted ? "0 0 0 3px color-mix(in srgb, var(--color-primary) 20%, transparent)" : undefined,
       }}
     >
       <div
@@ -192,8 +239,10 @@ function TxnCard({
           </p>
         )}
       </div>
-      {/* Reprint the bill on demand — reuses the payment record. */}
-      <PaidBillButton paymentId={txn.id} />
+      {/* Reprint the bill on demand — reuses the payment record. Auto-opens for
+          the highlighted bill, so landing here from "close & collect payment"
+          costs zero extra taps to print. */}
+      <PaidBillButton paymentId={txn.id} autoOpen={highlighted} />
       {/* Owner-only tender correction — only for a fully-settled, non-credit bill. */}
       {canEditTender && !onCredit && txn.method !== "credit" && (
         <TenderEditButton paymentId={txn.id} onEdited={onEdited} />
@@ -206,11 +255,17 @@ export function SalesView({
   initial,
   embedded = false,
   canEditTender = false,
+  highlightSessionId = null,
 }: {
   initial: SalesReport;
   embedded?: boolean;
   /** Owner + Security PIN set → each settled bill gets a tender-edit control. */
   canEditTender?: boolean;
+  /** A session that just closed with a full payment — scroll straight to ITS
+   *  bill and ring it, rather than leaving the cashier to scan today's list
+   *  for the one they were just looking at. Set from `?session=` on the
+   *  dashboard route (`closeSessionWithPayment`'s success redirect). */
+  highlightSessionId?: string | null;
 }) {
   const [report, setReport] = useState<SalesReport>(initial);
   const [period, setPeriod] = useState<SalesPeriod>(initial.period);
@@ -225,6 +280,10 @@ export function SalesView({
     return () => { activeRef.current = false; };
   }, []);
 
+  const highlightTxnId = highlightSessionId
+    ? report.transactions.find((t) => t.session_id === highlightSessionId)?.id ?? null
+    : null;
+
   const load = useCallback((p: SalesPeriod, from?: string, to?: string) => {
     startTransition(async () => {
       try {
@@ -235,6 +294,41 @@ export function SalesView({
       }
     });
   }, []);
+
+  // Landing here via the redirect (rather than a full page reload) sometimes
+  // outran the write it's supposed to show: the bill that JUST closed isn't
+  // in `initial.transactions` yet, so there's nothing to find or scroll to.
+  // A reload always re-fetches from scratch and therefore always has it —
+  // this reproduces exactly that, once, rather than waiting on `resync`'s
+  // realtime round trip (`useRealtime` below) to eventually correct it.
+  const refetchedForHighlight = useRef(false);
+  useEffect(() => {
+    if (!highlightSessionId || highlightTxnId || refetchedForHighlight.current || period !== "today") return;
+    refetchedForHighlight.current = true;
+    load("today");
+  }, [highlightSessionId, highlightTxnId, period, load]);
+
+  // Retries rather than a one-shot scroll, for the SAME reason
+  // `staff-dashboard.tsx`'s own `#sec-{focus}` scroll does: this can only
+  // succeed once the row exists, which depends on the refetch above landing.
+  // Retrying (rather than firing once and giving up) also means this reliably
+  // has the LAST word on scroll position — it keeps asserting until it
+  // succeeds, so it wins over the dashboard's own section-level scroll
+  // regardless of which happens to resolve first.
+  useEffect(() => {
+    if (!highlightTxnId) return;
+    let tries = 0;
+    const timer = setInterval(() => {
+      const el = document.getElementById(`sales-txn-${highlightTxnId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        clearInterval(timer);
+      } else if (++tries > 20) {
+        clearInterval(timer);
+      }
+    }, 150);
+    return () => clearInterval(timer);
+  }, [highlightTxnId]);
 
   const selectPeriod = useCallback((p: SalesPeriod) => {
     setPeriod(p);
@@ -283,9 +377,10 @@ export function SalesView({
   );
   useRealtime(["billing", "credits"], resync);
 
+  const grain = useMemo(() => grainFor(report.period, report.from, report.to), [report.period, report.from, report.to]);
   const groups = useMemo(
-    () => groupByDate(report.transactions, report.businessToday, report.businessYesterday),
-    [report.transactions, report.businessToday, report.businessYesterday]
+    () => groupByDate(report.transactions, report.businessToday, report.businessYesterday, grain),
+    [report.transactions, report.businessToday, report.businessYesterday, grain]
   );
 
   // A report cached by the client router from before credits existed has no
@@ -503,7 +598,13 @@ export function SalesView({
                 </div>
                 <div className="flex flex-col gap-2">
                   {g.items.map((t) => (
-                    <TxnCard key={t.id} txn={t} canEditTender={canEditTender} onEdited={resync} />
+                    <TxnCard
+                      key={t.id}
+                      txn={t}
+                      canEditTender={canEditTender}
+                      onEdited={resync}
+                      highlighted={t.id === highlightTxnId}
+                    />
                   ))}
                 </div>
               </div>

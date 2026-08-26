@@ -50,8 +50,11 @@ function RestaurantCard({ r }: { r: RestaurantRow }) {
         </p>
       </div>
 
+      {/* Dropped below sm: dot + logo + type pill + tier already crowd a phone
+          width down to almost nothing for the name — the one thing on this row
+          that actually varies and needs the space. */}
       <span
-        className="text-xs px-2 py-0.5 rounded-full border shrink-0"
+        className="hidden sm:inline-block text-xs px-2 py-0.5 rounded-full border shrink-0"
         style={{
           color: "var(--color-ink-mute)",
           borderColor: "var(--color-hairline)",
@@ -75,8 +78,8 @@ export default async function SuperAdminDashboardPage() {
   const restaurants = await getAllRestaurants();
 
   return (
-    <div className="p-8 max-w-3xl">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 sm:p-8 max-w-3xl">
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-6">
         <div>
           <h1
             className="text-xl"

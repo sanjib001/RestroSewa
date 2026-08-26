@@ -517,7 +517,7 @@ function PayrollLine({
           <span className="min-w-0">
             <span className="flex items-center gap-2 flex-wrap">
               <span
-                className="text-sm truncate"
+                className="text-sm truncate min-w-0"
                 style={{ color: "var(--color-ink)", opacity: row.is_active ? 1 : 0.55 }}
               >
                 {row.display_name}

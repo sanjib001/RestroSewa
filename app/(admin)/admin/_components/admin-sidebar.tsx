@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { logout } from "@/app/actions/auth";
 import {
   LayoutDashboard,
@@ -24,6 +24,7 @@ import {
 import { RestaurantLogo } from "@/components/branding/restaurant-logo";
 import { PlatformWordmark, PoweredBy } from "@/components/branding/platform-logo";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { useBodyScrollLock } from "@/lib/use-body-scroll-lock";
 
 type NavItem = {
   label: string;
@@ -221,12 +222,7 @@ export function AdminSidebar({
   const [mobileOpen, setMobileOpen] = useState(false);
 
   // With the drawer open, the page behind it must not scroll away underneath.
-  useEffect(() => {
-    if (!mobileOpen) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = prev; };
-  }, [mobileOpen]);
+  useBodyScrollLock(mobileOpen);
 
   function handleLogout() {
     startLogout(async () => { await logout(); });

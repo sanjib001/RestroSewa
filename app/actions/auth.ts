@@ -155,6 +155,14 @@ export async function loginWithEmailSuperAdmin(
   return { redirectTo: "/superadmin/dashboard" };
 }
 
+// A locked-out person is told how long is left, in the coarsest unit that
+// still reads as true — "1 minute" for anything under two, so a 90-second wait
+// doesn't claim to be "0 minutes".
+function minutesLeft(retryAfter: string): number {
+  const ms = new Date(retryAfter).getTime() - Date.now();
+  return Math.max(1, Math.ceil(ms / 60000));
+}
+
 export async function loginWithPin(
   _prevState: AuthResult,
   formData: FormData
@@ -166,6 +174,20 @@ export async function loginWithPin(
     return { error: "PIN must be exactly 4 digits." };
   }
 
+  const service = createServiceClient();
+
+  // Checked BEFORE ever calling Supabase Auth — a lockout must refuse even the
+  // right PIN, not just a wrong one, or it isn't really a lockout.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: lockRows } = await (service as any).rpc("pin_lockout_status", {
+    p_restaurant_user_id: restaurantUserId,
+  });
+  const lock = lockRows?.[0];
+  if (lock?.locked) {
+    const mins = minutesLeft(lock.retry_after);
+    return { error: `Too many wrong attempts. Try again in ${mins} minute${mins === 1 ? "" : "s"}.` };
+  }
+
   const syntheticEmail = `emp-${restaurantUserId}@restrosewa.internal`;
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({
@@ -173,13 +195,27 @@ export async function loginWithPin(
     password: pin,
   });
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (service as any).rpc("record_pin_attempt", {
+    p_restaurant_user_id: restaurantUserId,
+    p_success: !error,
+  });
+
   if (error) {
-    return { error: "Incorrect PIN. Please try again." };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: afterRows } = await (service as any).rpc("pin_lockout_status", {
+      p_restaurant_user_id: restaurantUserId,
+    });
+    const justLocked = afterRows?.[0]?.locked;
+    return {
+      error: justLocked
+        ? `Incorrect PIN. Too many wrong attempts — try again in 30 minutes.`
+        : "Incorrect PIN. Please try again.",
+    };
   }
 
   // Route by role so restaurant admins land on their management dashboard, not the
   // employee POS. Both admins and staff authenticate with the same synthetic-email + PIN.
-  const service = createServiceClient();
   // The restaurant's slug comes back on the same query as the role — it costs nothing here
   // and is what lets this device find its way back to the right till screen next time.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useBodyScrollLock } from "@/lib/use-body-scroll-lock";
 import { ShieldAlert, X } from "lucide-react";
 
 // Reusable Security-PIN gate. A controlled modal that collects the 4-digit admin PIN and
@@ -46,13 +47,13 @@ export function SecurityPinDialog({
     if (open) { setPin(""); setError(null); setPending(false); }
   }, [open]);
 
+  useBodyScrollLock(open);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !pending) onClose(); };
     document.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
+    return () => document.removeEventListener("keydown", onKey);
   }, [open, pending, onClose]);
 
   if (!open) return null;

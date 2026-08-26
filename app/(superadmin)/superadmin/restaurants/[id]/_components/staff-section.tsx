@@ -52,7 +52,7 @@ function StaffCard({
 
   return (
     <div
-      className="flex items-center gap-4 px-4 py-3 rounded-lg border"
+      className="flex items-center gap-4 px-4 py-3 rounded-lg border flex-wrap"
       style={{
         background: "var(--color-canvas)",
         borderColor: "var(--color-hairline)",

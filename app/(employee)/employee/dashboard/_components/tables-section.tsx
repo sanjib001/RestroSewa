@@ -11,7 +11,14 @@ import { TablesGrid } from "./tables-grid";
 // This server component does the FIRST fetch (so the list is in the HTML, with no
 // loading flash); TablesGrid keeps it live from there. Both reads are memoised
 // per request, so rendering this next to the Rooms section costs nothing extra.
-export async function TablesSection({ restaurantUser }: { restaurantUser: RestaurantUserContext }) {
+export async function TablesSection({
+  restaurantUser,
+  compact,
+}: {
+  restaurantUser: RestaurantUserContext;
+  /** Passed through to `TablesGrid` — see its own doc comment. */
+  compact?: boolean;
+}) {
   const [tables, visibility] = await Promise.all([
     getTableStatusOverview(restaurantUser.restaurant_id),
     buildVisibilityFilter(restaurantUser.restaurant_id, restaurantUser),
@@ -29,5 +36,12 @@ export async function TablesSection({ restaurantUser }: { restaurantUser: Restau
 
   // "None assigned to you" and "none exist at all" are different problems with
   // different fixes, so the empty state has to tell them apart.
-  return <TablesGrid initial={visible} hasAnyTables={tables.length > 0} canShift={canShift} />;
+  return (
+    <TablesGrid
+      initial={visible}
+      hasAnyTables={tables.length > 0}
+      canShift={canShift}
+      compact={compact}
+    />
+  );
 }

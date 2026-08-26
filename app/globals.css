@@ -467,4 +467,76 @@ header {
   }
 }
 
+/* Scrolls normally — arrow keys, wheel, drag, touch all still work — it just
+   doesn't PAINT a scrollbar track over it. For a panel that's meant to read as
+   one continuous surface (the session split-view's three columns) rather than
+   three separate scrolling widgets. `scrollbar-width` is the standard property
+   (Firefox); the pseudo-element is what Chrome/Safari/Edge actually need. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* A faintly-visible scrollbar, not a fully hidden one: for the session split-view's
+   three columns, which is one place `no-scrollbar` (above) turned out to hide the
+   "there's more below" cue entirely. Slim rather than the browser's default width,
+   and coloured from the same hairline token used for borders everywhere else, so it
+   reads as part of the UI rather than a stock browser element. */
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-hairline) transparent;
+}
+.thin-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-hairline);
+  border-radius: 999px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-mute);
+}
+
+/* `MenuBrowser`'s own item-grid scroll region — shared between the mobile
+   `/add` page (full-screen, invisible scrollbar, unchanged) and the desktop
+   split-view's menu column (where it should behave like `thin-scrollbar`
+   above). One class, `lg:`-gated, rather than two classes fighting over the
+   same element: below `lg` this is identical to `.no-scrollbar`; at `lg` and
+   up it becomes `.thin-scrollbar`. */
+.menu-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.menu-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+@media (min-width: 1024px) {
+  .menu-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-hairline) transparent;
+  }
+  .menu-scrollbar::-webkit-scrollbar {
+    display: block;
+    width: 6px;
+    height: 6px;
+  }
+  .menu-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .menu-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--color-hairline);
+    border-radius: 999px;
+  }
+  .menu-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: var(--color-ink-mute);
+  }
+}
+
 /* /random testing only */

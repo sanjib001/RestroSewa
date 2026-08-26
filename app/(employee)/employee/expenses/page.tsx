@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { requireRestaurantStaff } from "@/lib/auth/guards";
 import { STOCK_ACCESS } from "@/lib/permissions";
-import { listExtraExpenses, listSavings, listSavingTitles } from "@/app/actions/expenses";
+import { listExtraExpenses, listSavingTitles } from "@/app/actions/expenses";
 import { getRestaurantConfig } from "@/lib/restaurant-info";
 import { ExpensesClient } from "@/app/(admin)/admin/expenses/_components/expenses-client";
 
@@ -26,10 +26,9 @@ export default async function EmployeeExpensesPage() {
 
   const todayOnly = STOCK_ACCESS.expensesTodayOnly(restaurantUser);
 
-  const [expenses, titles, savings, config] = await Promise.all([
+  const [expenses, titles, config] = await Promise.all([
     listExtraExpenses({ period: todayOnly ? "today" : "month" }),
     listSavingTitles(),
-    listSavings(),
     getRestaurantConfig(restaurantUser.restaurant_id),
   ]);
 
@@ -49,7 +48,6 @@ export default async function EmployeeExpensesPage() {
       <ExpensesClient
         initialExpenses={expenses}
         initialTitles={titles}
-        initialSavings={savings}
         canManage={STOCK_ACCESS.canManageExpenses(restaurantUser)}
         canAdd={STOCK_ACCESS.canAddExpenses(restaurantUser)}
         todayOnly={todayOnly}
